@@ -1,6 +1,9 @@
 {
-    "name": "VRChatPackageTemplate.Editor",
-    "references": [],
+    "name": "MitToon.Editor",
+    "rootNamespace": "MitToon.Editor",
+    "references": [
+        "MitToon.Runtime"
+    ],
     "includePlatforms": [
         "Editor"
     ],

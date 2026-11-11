@@ -1,0 +1,20 @@
+{
+    "name": "MitToon.Runtime",
+    "rootNamespace": "MitToon",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.base",
+            "expression": "",
+            "define": "MITTOON_VRCSDK"
+        }
+    ],
+    "noEngineReferences": false
+}

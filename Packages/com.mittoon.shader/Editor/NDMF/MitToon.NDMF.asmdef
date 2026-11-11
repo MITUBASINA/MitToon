@@ -1,0 +1,27 @@
+{
+    "name": "MitToon.NDMF",
+    "rootNamespace": "MitToon.NDMF",
+    "references": [
+        "MitToon.Runtime",
+        "nadena.dev.ndmf"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "MITTOON_NDMF"
+    ],
+    "versionDefines": [
+        {
+            "name": "nadena.dev.ndmf",
+            "expression": "",
+            "define": "MITTOON_NDMF"
+        }
+    ],
+    "noEngineReferences": false
+}

@@ -1,0 +1,70 @@
+MitToon - Third Party Notices
+=============================
+
+MitToon は以下の MIT ライセンスのシェーダーを参考にしています。
+コードを直接コピーしたのではなく、手法や機能の考え方を参考に MitToon 向けに書き直したものです。
+MIT ライセンスの条件に従い、それぞれの著作権表示と許諾表示を以下に記載します。
+
+MitToon references the following MIT licensed shaders. Their techniques and feature ideas were
+re-implemented for MitToon (not copied verbatim). The copyright and permission notices are reproduced below
+as required by the MIT License.
+
+参考にした主な部分 / Main references
+- lilToon
+  - ライト方向の合成 (主光源 + 球面調和の方向、上向きに保つ) / light direction from main light + SH, kept above the horizon
+  - SH の明側 / 暗側を使った明暗色、明るさの上限 / 下限、単色化、Unlit 化 / lit and shade colour from SH, light limits, monochrome, unlit blend
+  - 裏面の色、UV タイルでの非表示、ディゾルブ、距離フェード / backface colour, UV tile discard, dissolve, distance fade
+  - lilToon モード: 3 段階の影、AO / ぼかしマスク、リムと影側リム、リムシェード、逆光、マットキャップの UV、色調補正、頂点ライトの減衰、マテリアル変換時のプロパティ対応 / lilToon mode: 3 step shadows, AO / blur masks, rim and shadow side rim, rim shade, backlight, matcap UV, tone correction, vertex light falloff, property mapping on conversion
+- Poiyomi Toon Shader (GitHub で公開されている無料版 / the free version published on GitHub)
+  - 追加ライトの明るさ上限、影側への透過、単色化、ディレクショナルの無視 / additional light limit, passthrough, monochrome, ignore directional
+  - ミラー / カメラでの表示切替、フリップブック、頂点の揺れ / mirror and camera visibility, flipbook, vertex wobble
+  - ライトの色の方式 / 明暗の付け方 / ライト方向の方式の切り替え (カメラ基準の角度オフセットを含む) / light color, light map and light direction modes (incl. camera based angle offsets)
+
+Source: https://github.com/lilxyzw/lilToon
+-------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2020-2024 lilxyzw
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+Source: https://github.com/poiyomi/PoiyomiToonShader
+-------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2026 Poiyomi Labs
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

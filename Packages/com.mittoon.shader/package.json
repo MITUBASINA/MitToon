@@ -1,0 +1,12 @@
+{
+  "name": "com.mittoon.shader",
+  "displayName": "MitToon",
+  "version": "1.0.0",
+  "unity": "2022.3",
+  "description": "Toon shader for VRChat (Built-in Render Pipeline).",
+  "license": "MIT",
+  "author": {
+    "name": "MITUBASINA",
+    "url": "https://x.com/MITUBASINA"
+  }
+}
