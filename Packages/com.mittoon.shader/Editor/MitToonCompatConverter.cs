@@ -19,6 +19,45 @@ namespace MitToon.Editor
             return has("_UseShadow") && has("_ShadowBorderMask") && has("_TransparentMode") && has("_MainTexHSVG");
         }
 
+        // the separate fake shadow material (hair shadow drawn onto the face through the stencil)
+        public const string FakeShadowShaderName = "MitToon/Optional/FakeShadow";
+        public static bool IsFakeShadowSource(Shader s)
+        {
+            if (s == null || s.name.StartsWith("MitToon/")) return false;
+            return s.FindPropertyIndex("_FakeShadowVector") >= 0 && s.FindPropertyIndex("_StencilComp") >= 0 && s.FindPropertyIndex("_ShadowBorderMask") < 0;
+        }
+        public static bool CanConvert(Shader s) => IsSource(s) || IsFakeShadowSource(s);
+
+        // converts either kind; returns notes like Apply
+        public static List<string> Convert(Material m)
+        {
+            var sn = Take(m);
+            return IsFakeShadowSource(m.shader) ? ApplyFakeShadow(m, sn) : Apply(m, sn);
+        }
+
+        public static List<string> ApplyFakeShadow(Material m, Snapshot sn)
+        {
+            var notes = new List<string>();
+            var target = Shader.Find(FakeShadowShaderName);
+            if (target == null) { notes.Add("MitToon のフェイクシャドウシェーダーが見つかりません"); return notes; }
+            m.shader = target;
+            // the property names are the same: copy them explicitly (the source declares some of them as integers)
+            for (int i = 0; i < target.GetPropertyCount(); i++)
+            {
+                string p = target.GetPropertyName(i);
+                switch (target.GetPropertyType(i))
+                {
+                    case ShaderPropertyType.Float:
+                    case ShaderPropertyType.Range: if (sn.f.TryGetValue(p, out var fv)) m.SetFloat(p, fv); break;
+                    case ShaderPropertyType.Color: if (sn.c.TryGetValue(p, out var cv)) m.SetColor(p, Space(m, p, sn, p, cv)); break;
+                    case ShaderPropertyType.Vector: if (sn.v.TryGetValue(p, out var vv)) m.SetVector(p, vv); break;
+                    case ShaderPropertyType.Texture: T(m, p, sn, p); break;
+                }
+            }
+            m.renderQueue = sn.renderQueue;
+            return notes;
+        }
+
         public class Snapshot
         {
             public string shaderName;
@@ -277,14 +316,14 @@ namespace MitToon.Editor
                         if (mm != null) mats.Add(mm);
                     }
             }
-            var targets = mats.Where(x => IsSource(x.shader)).ToList();
+            var targets = mats.Where(x => CanConvert(x.shader)).ToList();
             if (targets.Count == 0) { EditorUtility.DisplayDialog("MitToon", "変換できるマテリアルが選択されていません。", "OK"); return; }
             if (!EditorUtility.DisplayDialog("MitToon", targets.Count + " 個のマテリアルを MitToon に変換します。元に戻すには Ctrl+Z を使ってください。", "変換", "キャンセル")) return;
             Undo.RecordObjects(targets.ToArray(), "MitToon convert");
             int noted = 0;
             foreach (var mt in targets)
             {
-                var notes = Apply(mt, Take(mt));
+                var notes = Convert(mt);
                 EditorUtility.SetDirty(mt);
                 if (notes.Count > 0) { noted++; Debug.Log("MitToon: " + mt.name + "\n  " + string.Join("\n  ", notes), mt); }
             }
@@ -298,9 +337,9 @@ namespace MitToon.Editor
         static void ConvertContext(MenuCommand cmd)
         {
             var m = cmd.context as Material;
-            if (m == null || !IsSource(m.shader)) { EditorUtility.DisplayDialog("MitToon", "このマテリアルは変換に対応していません。", "OK"); return; }
+            if (m == null || !CanConvert(m.shader)) { EditorUtility.DisplayDialog("MitToon", "このマテリアルは変換に対応していません。", "OK"); return; }
             Undo.RecordObject(m, "MitToon convert");
-            var notes = Apply(m, Take(m));
+            var notes = Convert(m);
             EditorUtility.SetDirty(m);
             if (notes.Count > 0) Debug.Log("MitToon: " + m.name + "\n  " + string.Join("\n  ", notes), m);
         }

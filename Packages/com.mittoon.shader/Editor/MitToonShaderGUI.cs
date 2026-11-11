@@ -452,8 +452,10 @@ namespace MitToon.Editor
             var mat = (Material)me.target;
             InitStyles();
 
-            if (sectionProps == null)
+            bool fake = IsFakeShadow(mat);
+            if (sectionProps == null || sectionsFake != fake)
             {
+                sectionsFake = fake;
                 sectionProps = new Dictionary<string, List<string>>();
                 collecting = true;
                 try { DrawAll(mat); }
@@ -463,11 +465,50 @@ namespace MitToon.Editor
             DrawTitle();
             DrawSearch();
             DrawAll(mat);
-            DrawFooter();
+            DrawFooter(fake);
+        }
+
+        static bool sectionsFake;
+        static bool IsFakeShadow(Material m) => m != null && m.shader != null && m.shader.name == MitToonCompatConverter.FakeShadowShaderName;
+
+        // the fake shadow material shares this inspector with its own short list of modules
+        void DrawFakeShadow()
+        {
+            Category("フェイクシャドウ", "Fake Shadow");
+            if (Module("fakeshadow", "フェイクシャドウ (髪の影を顔に落とす)", "Fake Shadow (hair shadow on the face)", null, false, true))
+            {
+                if (!collecting && !Searching)
+                    EditorGUILayout.HelpBox(T("髪のメッシュに追加するマテリアルです。顔のマテリアルの「詳細設定」でステンシル参照値を同じ値、ステンシル比較を Always、ステンシル Pass を Replace にすると、顔の上にだけ影が出ます。Tools > MitToon > アバターのマテリアル一括設定 からまとめて設定できます。",
+                                              "Add this material to the hair mesh. On the face material set Stencil Ref to the same value, Compare to Always and Pass to Replace (Advanced), so the shadow only shows on the face. Tools > MitToon > Avatar Batch sets this up for you."), MessageType.None);
+                Prop("_Invisible");
+                Tex("_MainTex", "_Color");
+                Vec("_FakeShadowVector", new[] { T("向き X", "Direction X"), T("向き Y", "Direction Y"), T("向き Z", "Direction Z"), T("ずらす距離 (m)", "Distance (m)") },
+                    new float[4], new float[4]);
+                EndModule();
+            }
+            if (Module("fakestencil", "ステンシル (顔と組み合わせる)", "Stencil (pairs with the face)", null, false, true))
+            {
+                Props("_StencilRef", "_StencilComp", "_StencilPass", "_StencilFail", "_StencilZFail", "_StencilReadMask", "_StencilWriteMask");
+                EndModule();
+            }
+            Category("レンダリング", "Rendering");
+            if (Module("fakeadvanced", "詳細設定 (描画)", "Advanced (rendering)"))
+            {
+                Props("_Cull", "_ZWrite", "_ZTest", "_ZClip", "_OffsetFactor", "_OffsetUnits", "_ColorMask", "_AlphaToMask");
+                Sub("合成", "Blending");
+                Props("_SrcBlend", "_DstBlend", "_BlendOp", "_SrcBlendAlpha", "_DstBlendAlpha", "_BlendOpAlpha");
+                if (!collecting && !Searching)
+                {
+                    me.RenderQueueField();
+                    me.EnableInstancingField();
+                }
+                EndModule();
+            }
         }
 
         void DrawAll(Material mat)
         {
+            if (IsFakeShadow(mat)) { DrawFakeShadow(); return; }
             DrawQuick(mat);
             DrawBase(mat);
 
@@ -541,7 +582,7 @@ namespace MitToon.Editor
             float langW = Mathf.Max(GUI.skin.button.CalcSize(new GUIContent("日本語")).x + 6, 44) * 2;
             int lang = GUI.Toolbar(new Rect(r.xMax - 96 - langW, r.y + 7, langW, 18), JP ? 0 : 1, new[] { "日本語", "EN" });
             if (lang != (JP ? 0 : 1)) JP = lang == 0;
-            if (GUI.Button(new Rect(r.xMax - 90, r.y + 7, 84, 18), T("プリセット ▼", "Presets ▼")))
+            if (!IsFakeShadow((Material)me.target) && GUI.Button(new Rect(r.xMax - 90, r.y + 7, 84, 18), T("プリセット ▼", "Presets ▼")))
             {
                 var targets = me.targets.Cast<Material>().ToArray();
                 var menu = new GenericMenu();
@@ -569,12 +610,13 @@ namespace MitToon.Editor
             EditorGUILayout.Space(2);
         }
 
-        void DrawFooter()
+        void DrawFooter(bool fake)
         {
             EditorGUILayout.Space(10);
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(T("すべて閉じる", "Collapse all")))
                 foreach (var k in sectionProps.Keys) EditorPrefs.SetBool("MitToon.Fold." + k, false);
+            if (fake) { EditorGUILayout.EndHorizontal(); return; }
             if (GUILayout.Button(T("無効モジュールのテクスチャを外す", "Strip textures of disabled modules")))
             {
                 if (EditorUtility.DisplayDialog("MitToon",
@@ -1788,6 +1830,14 @@ namespace MitToon.Editor
 
         public override void AssignNewShaderToMaterial(Material material, Shader oldShader, Shader newShader)
         {
+            if (newShader != null && newShader.name == MitToonCompatConverter.FakeShadowShaderName)
+            {
+                // fake shadow: values carry over by name; a fake shadow source is copied explicitly (some of its values are integers)
+                var fs = MitToonCompatConverter.Take(material);
+                base.AssignNewShaderToMaterial(material, oldShader, newShader);
+                if (MitToonCompatConverter.IsFakeShadowSource(oldShader)) MitToonCompatConverter.ApplyFakeShadow(material, fs);
+                return;
+            }
             if (MitToonCompatConverter.IsSource(oldShader))
             {
                 // switched from a compatible toon shader: keep the look (values read before the shader changes)
