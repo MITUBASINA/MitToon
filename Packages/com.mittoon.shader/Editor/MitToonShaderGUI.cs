@@ -26,7 +26,20 @@ namespace MitToon.Editor
             BaseShaderName, OutlineShaderName, TwoPassShaderName, OutlineTwoPassShaderName,
             BaseShaderName + TessSuffix, OutlineShaderName + TessSuffix, TwoPassShaderName + TessSuffix, OutlineTwoPassShaderName + TessSuffix,
         };
-        public const string Version = "1.0";
+        // read from package.json, so the inspector always shows the installed release
+        static string version;
+        public static string Version
+        {
+            get
+            {
+                if (version == null)
+                {
+                    var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(MitToonShaderGUI).Assembly);
+                    version = info != null && !string.IsNullOrEmpty(info.version) ? info.version : "?";
+                }
+                return version;
+            }
+        }
         static readonly Color Accent = new Color(0.36f, 0.62f, 1f);
 
         public static bool JP
