@@ -1518,6 +1518,7 @@ namespace MitToon.Editor
                         Sub("影側のリム", "Shadow Side Rim");
                         Props("_RimIndirColor", "_RimIndirRange", "_RimIndirBorder", "_RimIndirBlur");
                     }
+                    RimEmission("_Rim", compat);
                     if (When(!compat))
                     {
                         Sub("深度リム (ゲーム風の一定幅リム)", "Depth Rim (constant width)");
@@ -1537,6 +1538,7 @@ namespace MitToon.Editor
                         if (When(!compat && F(r + "LitSideOnly") > 0)) Prop(r + "LitSideBlur");
                         Props(r + "Border", r + "Blur", r + "FresnelPower", r + "LightDir", r + "ShadowMask", r + "MainStrength",
                               r + "NormalStrength", r + "EnableLighting", r + "BackfaceMask");
+                        RimEmission(r, compat);
                         EndModule();
                     }
                 }
@@ -1564,6 +1566,21 @@ namespace MitToon.Editor
                      "Constant width rim from depth discontinuities. Falls back to fresnel where no depth texture exists (mirrors).", MessageType.None);
                 EndModule();
             }
+        }
+
+        // emissive part of a rim light: strength, blink and hue cycle only show once it is in use
+        void RimEmission(string r, bool compat)
+        {
+            if (!When(!compat)) return;   // the lilToon mode draws rims without emission
+            Sub("発光", "Emission");
+            Prop(r + "Emission");
+            var e = P(r + "Emission");
+            if (collecting || Searching || e == null || e.hasMixedValue || e.floatValue > 0.001f)
+            {
+                Prop(r + "EmissionStrength");
+                BlinkVec(r + "Blink");
+            }
+            Prop(r + "HueSpeed");
         }
 
         void DrawGlitter()

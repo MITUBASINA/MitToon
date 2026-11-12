@@ -98,6 +98,8 @@ CBUFFER_START(UnityPerMaterial)
     float4 _Rim3Color;
     float  _UseRim3, _Rim3Border, _Rim3Blur, _Rim3FresnelPower, _Rim3LightDir, _Rim3ShadowMask, _Rim3MainStrength, _Rim3NormalStrength, _Rim3EnableLighting, _Rim3BackfaceMask;
     float  _Rim3BlendMode, _Rim3LitSideOnly, _Rim3LitSideBlur;
+    float  _RimEmission, _RimEmissionStrength, _RimHueSpeed, _Rim2Emission, _Rim2EmissionStrength, _Rim2HueSpeed, _Rim3Emission, _Rim3EmissionStrength, _Rim3HueSpeed;
+    float4 _RimBlink, _Rim2Blink, _Rim3Blink;
     // MatCap
     float4 _MatCapColor;
     float  _MatCapBlend, _MatCapLod, _MatCapEnableLighting, _MatCapShadowMask, _MatCapMainStrength, _MatCapNormalStrength;

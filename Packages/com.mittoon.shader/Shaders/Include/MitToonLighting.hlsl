@@ -193,6 +193,24 @@ float3 LumiRimBlend(float3 col, float3 rc, float a, float mode)
     if (mode < 2.5) return lerp(col, col * rc, a);
     return lerp(col, rc, a);
 }
+
+// rim colour with the optional hue cycle (a white rim still cycles visibly)
+float3 LumiRimHue(float3 c, float speed)
+{
+    if (speed < 0.0001) return c;
+    float3 hsv = LumiRGB2HSV(c);
+    hsv.x = frac(hsv.x + _Time.y * speed);
+    hsv.y = max(hsv.y, 0.6);
+    return LumiHSV2RGB(hsv);
+}
+
+// strength of the emissive part: emission strength times the optional blink
+float LumiRimBlink(float strength, float4 blink)
+{
+    float b = sin(_Time.y * blink.y + blink.z) * 0.5 + 0.5;
+    if (blink.w > 0.5) b = step(0.5, b);
+    return strength * lerp(1, b, blink.x);
+}
 #endif
 
 #if defined(_LUMI_ANISO)
@@ -1017,6 +1035,8 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
 #endif
 
     // ---- Rim lights 1 / 2 / 3 (one keyword, each with its own switch)
+    // the emissive part of each rim is collected here and added with the emission (glows the same in any world)
+    float3 rimEmis = 0;
 #if defined(_LUMI_RIM) && !defined(_LUMI_COMPAT)
     [branch] if (_UseRim > 0.5)
     {
@@ -1026,8 +1046,10 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
             r = LumiDepthRim(Nr, d.screenUV, d.eyeDepth, _RimDepthWidth, _RimDepthThreshold) * lerp(1, r, 0.25);
         r = LumiRimLightMask(r, Nr, c.toonDir, _RimLightDir, _RimShadowMask, _RimBackfaceMask, _RimLitSideOnly, _RimLitSideBlur, lit, d.facing);
         float4 rt = LUMI_SAMPLE(_RimTex, uv);
-        float3 rc = _RimColor.rgb * rt.rgb * lerp(1, s.albedo, _RimMainStrength) * lerp(1, c.litLight, _RimEnableLighting);
-        col = LumiRimBlend(col, rc, saturate(r) * _RimColor.a * rt.a, _RimBlendMode);
+        float3 rb = LumiRimHue(_RimColor.rgb, _RimHueSpeed) * rt.rgb * lerp(1, s.albedo, _RimMainStrength);
+        float ra = saturate(r) * _RimColor.a * rt.a;
+        col = LumiRimBlend(col, rb * lerp(1, c.litLight, _RimEnableLighting), ra * (1.0 - _RimEmission), _RimBlendMode);
+        rimEmis += rb * (ra * _RimEmission * LumiRimBlink(_RimEmissionStrength, _RimBlink));
     }
     [branch] if (_UseRim2 > 0.5)
     {
@@ -1035,8 +1057,10 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         float r = LumiSmoothBorder(pow(saturate(1.0 - dot(Nr, c.V)), _Rim2FresnelPower), _Rim2Border, _Rim2Blur);
         r = LumiRimLightMask(r, Nr, c.toonDir, _Rim2LightDir, _Rim2ShadowMask, _Rim2BackfaceMask, _Rim2LitSideOnly, _Rim2LitSideBlur, lit, d.facing);
         float4 rt = LUMI_SAMPLE(_Rim2Tex, uv);
-        float3 rc = _Rim2Color.rgb * rt.rgb * lerp(1, s.albedo, _Rim2MainStrength) * lerp(1, c.litLight, _Rim2EnableLighting);
-        col = LumiRimBlend(col, rc, saturate(r) * _Rim2Color.a * rt.a, _Rim2BlendMode);
+        float3 rb = LumiRimHue(_Rim2Color.rgb, _Rim2HueSpeed) * rt.rgb * lerp(1, s.albedo, _Rim2MainStrength);
+        float ra = saturate(r) * _Rim2Color.a * rt.a;
+        col = LumiRimBlend(col, rb * lerp(1, c.litLight, _Rim2EnableLighting), ra * (1.0 - _Rim2Emission), _Rim2BlendMode);
+        rimEmis += rb * (ra * _Rim2Emission * LumiRimBlink(_Rim2EmissionStrength, _Rim2Blink));
     }
     [branch] if (_UseRim3 > 0.5)
     {
@@ -1044,8 +1068,10 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         float r = LumiSmoothBorder(pow(saturate(1.0 - dot(Nr, c.V)), _Rim3FresnelPower), _Rim3Border, _Rim3Blur);
         r = LumiRimLightMask(r, Nr, c.toonDir, _Rim3LightDir, _Rim3ShadowMask, _Rim3BackfaceMask, _Rim3LitSideOnly, _Rim3LitSideBlur, lit, d.facing);
         float4 rt = LUMI_SAMPLE(_Rim3Tex, uv);
-        float3 rc = _Rim3Color.rgb * rt.rgb * lerp(1, s.albedo, _Rim3MainStrength) * lerp(1, c.litLight, _Rim3EnableLighting);
-        col = LumiRimBlend(col, rc, saturate(r) * _Rim3Color.a * rt.a, _Rim3BlendMode);
+        float3 rb = LumiRimHue(_Rim3Color.rgb, _Rim3HueSpeed) * rt.rgb * lerp(1, s.albedo, _Rim3MainStrength);
+        float ra = saturate(r) * _Rim3Color.a * rt.a;
+        col = LumiRimBlend(col, rb * lerp(1, c.litLight, _Rim3EnableLighting), ra * (1.0 - _Rim3Emission), _Rim3BlendMode);
+        rimEmis += rb * (ra * _Rim3Emission * LumiRimBlink(_Rim3EmissionStrength, _Rim3Blink));
     }
 #endif
 
@@ -1132,7 +1158,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         col = lerp(col, body,_RefractStrength * (1.0 - fr));
     }
 
-    col += s.emission + offRimEmis;
+    col += s.emission + offRimEmis + rimEmis;
 
 #if defined(_LUMI_COMPAT)
     col = d.facing < 0 ? lerp(col, _BackfaceColor.rgb * c.litLight, _BackfaceColor.a) : col;

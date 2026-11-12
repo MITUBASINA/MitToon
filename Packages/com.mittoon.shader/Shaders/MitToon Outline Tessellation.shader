@@ -334,6 +334,10 @@ Shader "MitToon/MitToon Outline Tessellation"
         [Enum(Add,0,Screen,1,Multiply,2,Replace,3)] _RimBlendMode ("合成モード|Blend Mode", Float) = 0
         _RimLitSideOnly ("光の当たる側にだけ出す|Lit Side Only", Range(0, 1)) = 0
         _RimLitSideBlur ("光の当たる側の境界ぼかし|Lit Side Blur", Range(0.01, 1)) = 0.3
+        _RimEmission ("発光にする (ライトの影響を受けない)|Emissive (ignores lights)", Range(0, 1)) = 0
+        _RimEmissionStrength ("発光の強さ|Emission Strength", Range(0, 10)) = 1
+        _RimBlink ("点滅 (強度, 速さ, 位相, 矩形波)|Blink (strength, speed, phase, square)", Vector) = (0, 2, 0, 0)
+        _RimHueSpeed ("色相の変化 (虹色, 回/秒)|Hue Cycle (rainbow, per second)", Range(0, 2)) = 0
         // ---------- Rim light 2 ----------
         [ToggleUI] _UseRim2 ("リムライト2|Rim Light 2", Float) = 0
         [HDR] _Rim2Color ("色|Color", Color) = (0.55, 0.65, 1, 1)
@@ -350,6 +354,10 @@ Shader "MitToon/MitToon Outline Tessellation"
         [Enum(Add,0,Screen,1,Multiply,2,Replace,3)] _Rim2BlendMode ("合成モード|Blend Mode", Float) = 0
         _Rim2LitSideOnly ("光の当たる側にだけ出す|Lit Side Only", Range(0, 1)) = 0
         _Rim2LitSideBlur ("光の当たる側の境界ぼかし|Lit Side Blur", Range(0.01, 1)) = 0.3
+        _Rim2Emission ("発光にする (ライトの影響を受けない)|Emissive (ignores lights)", Range(0, 1)) = 0
+        _Rim2EmissionStrength ("発光の強さ|Emission Strength", Range(0, 10)) = 1
+        _Rim2Blink ("点滅 (強度, 速さ, 位相, 矩形波)|Blink (strength, speed, phase, square)", Vector) = (0, 2, 0, 0)
+        _Rim2HueSpeed ("色相の変化 (虹色, 回/秒)|Hue Cycle (rainbow, per second)", Range(0, 2)) = 0
         // ---------- Rim light 3 ----------
         [ToggleUI] _UseRim3 ("リムライト3|Rim Light 3", Float) = 0
         [HDR] _Rim3Color ("色|Color", Color) = (1, 0.85, 0.6, 1)
@@ -366,6 +374,10 @@ Shader "MitToon/MitToon Outline Tessellation"
         [Enum(Add,0,Screen,1,Multiply,2,Replace,3)] _Rim3BlendMode ("合成モード|Blend Mode", Float) = 0
         _Rim3LitSideOnly ("光の当たる側にだけ出す|Lit Side Only", Range(0, 1)) = 0
         _Rim3LitSideBlur ("光の当たる側の境界ぼかし|Lit Side Blur", Range(0.01, 1)) = 0.3
+        _Rim3Emission ("発光にする (ライトの影響を受けない)|Emissive (ignores lights)", Range(0, 1)) = 0
+        _Rim3EmissionStrength ("発光の強さ|Emission Strength", Range(0, 10)) = 1
+        _Rim3Blink ("点滅 (強度, 速さ, 位相, 矩形波)|Blink (strength, speed, phase, square)", Vector) = (0, 2, 0, 0)
+        _Rim3HueSpeed ("色相の変化 (虹色, 回/秒)|Hue Cycle (rainbow, per second)", Range(0, 2)) = 0
 
         // ---------- MatCap ----------
         [Toggle(_LUMI_MATCAP)] _UseMatCap ("マットキャップ|MatCap", Float) = 0
