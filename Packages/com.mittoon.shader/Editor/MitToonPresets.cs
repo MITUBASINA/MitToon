@@ -241,18 +241,20 @@ namespace MitToon.Editor
             // ---------------------------------------------------------------- stencil
             new Preset { id = "stencileye", category = Stencil, jp = "前髪透け: 目・眉 側", en = "Hair see-through: eyes / brows", apply = m =>
             {
-                F(m, "_StencilRef", 47); F(m, "_StencilComp", 8); F(m, "_StencilPass", 2); m.renderQueue = 2001;
+                St(m, 47, 8, 2); m.renderQueue = 2001;
             }},
             new Preset { id = "stencilhair", category = Stencil, jp = "前髪透け: 前髪 側", en = "Hair see-through: bangs", apply = m =>
             {
-                F(m, "_StencilRef", 47); F(m, "_StencilComp", 6); F(m, "_StencilPass", 0); m.renderQueue = 2002;
+                St(m, 47, 6, 0); m.renderQueue = 2002;
             }},
             new Preset { id = "stencilreset", category = Stencil, jp = "ステンシル解除", en = "Reset stencil", apply = m =>
             {
-                F(m, "_StencilRef", 0); F(m, "_StencilComp", 8); F(m, "_StencilPass", 0); m.renderQueue = -1;
+                St(m, 0, 8, 0); m.renderQueue = -1;
             }},
         };
 
+        // the normal, outline and transparent stencils together (they were one before the split)
+        static void St(Material m, float r, float comp, float pass) { foreach (var g in new[] { "_Stencil", "_OutlineStencil", "_PreStencil" }) { F(m, g + "Ref", r); F(m, g + "Comp", comp); F(m, g + "Pass", pass); } F(m, "_StencilSplit", 1); }
         public static void Apply(Material m, string id)
         {
             foreach (var p in All) if (p.id == id) p.apply(m);

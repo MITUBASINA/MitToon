@@ -24,6 +24,21 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
         [Enum(UnityEngine.Rendering.StencilOp)] _StencilPass ("ステンシル Pass|Stencil Pass", Float) = 0
         [Enum(UnityEngine.Rendering.StencilOp)] _StencilFail ("ステンシル Fail|Stencil Fail", Float) = 0
         [Enum(UnityEngine.Rendering.StencilOp)] _StencilZFail ("ステンシル ZFail|Stencil ZFail", Float) = 0
+        _OutlineStencilRef ("アウトライン ステンシル参照値|Outline Stencil Ref", Range(0, 255)) = 0
+        _OutlineStencilReadMask ("アウトライン ステンシル読込マスク|Outline Stencil Read Mask", Range(0, 255)) = 255
+        _OutlineStencilWriteMask ("アウトライン ステンシル書込マスク|Outline Stencil Write Mask", Range(0, 255)) = 255
+        [Enum(UnityEngine.Rendering.CompareFunction)] _OutlineStencilComp ("アウトライン ステンシル比較|Outline Stencil Compare", Float) = 8
+        [Enum(UnityEngine.Rendering.StencilOp)] _OutlineStencilPass ("アウトライン ステンシルPass|Outline Stencil Pass", Float) = 0
+        [Enum(UnityEngine.Rendering.StencilOp)] _OutlineStencilFail ("アウトライン ステンシルFail|Outline Stencil Fail", Float) = 0
+        [Enum(UnityEngine.Rendering.StencilOp)] _OutlineStencilZFail ("アウトライン ステンシルZFail|Outline Stencil ZFail", Float) = 0
+        _PreStencilRef ("透過 (裏面) ステンシル参照値|Transparent (back) Stencil Ref", Range(0, 255)) = 0
+        _PreStencilReadMask ("透過 (裏面) ステンシル読込マスク|Transparent (back) Stencil Read Mask", Range(0, 255)) = 255
+        _PreStencilWriteMask ("透過 (裏面) ステンシル書込マスク|Transparent (back) Stencil Write Mask", Range(0, 255)) = 255
+        [Enum(UnityEngine.Rendering.CompareFunction)] _PreStencilComp ("透過 (裏面) ステンシル比較|Transparent (back) Stencil Compare", Float) = 8
+        [Enum(UnityEngine.Rendering.StencilOp)] _PreStencilPass ("透過 (裏面) ステンシルPass|Transparent (back) Stencil Pass", Float) = 0
+        [Enum(UnityEngine.Rendering.StencilOp)] _PreStencilFail ("透過 (裏面) ステンシルFail|Transparent (back) Stencil Fail", Float) = 0
+        [Enum(UnityEngine.Rendering.StencilOp)] _PreStencilZFail ("透過 (裏面) ステンシルZFail|Transparent (back) Stencil ZFail", Float) = 0
+        [HideInInspector] _StencilSplit ("Stencil split (outline / transparent) migrated", Float) = 0
 
         // ---------- Main ----------
         _Color ("メインカラー|Main Color", Color) = (1,1,1,1)
@@ -838,6 +853,16 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
         {
             Name "OUTLINE"
             Tags { "LightMode" = "ForwardBase" }
+            Stencil
+            {
+                Ref [_OutlineStencilRef]
+                ReadMask [_OutlineStencilReadMask]
+                WriteMask [_OutlineStencilWriteMask]
+                Comp [_OutlineStencilComp]
+                Pass [_OutlineStencilPass]
+                Fail [_OutlineStencilFail]
+                ZFail [_OutlineStencilZFail]
+            }
             Cull Front
             ZWrite [_ZWrite]
             ZTest [_ZTest]
@@ -868,6 +893,16 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
         {
             Name "FORWARD_BACK"
             Tags { "LightMode" = "ForwardBase" }
+            Stencil
+            {
+                Ref [_PreStencilRef]
+                ReadMask [_PreStencilReadMask]
+                WriteMask [_PreStencilWriteMask]
+                Comp [_PreStencilComp]
+                Pass [_PreStencilPass]
+                Fail [_PreStencilFail]
+                ZFail [_PreStencilZFail]
+            }
             Cull Front
             ZWrite Off
             ZTest [_ZTest]
@@ -931,6 +966,16 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
         {
             Name "FORWARD_BACK_DELTA"
             Tags { "LightMode" = "ForwardAdd" }
+            Stencil
+            {
+                Ref [_PreStencilRef]
+                ReadMask [_PreStencilReadMask]
+                WriteMask [_PreStencilWriteMask]
+                Comp [_PreStencilComp]
+                Pass [_PreStencilPass]
+                Fail [_PreStencilFail]
+                ZFail [_PreStencilZFail]
+            }
             Cull Front
             ZWrite Off
             ZTest LEqual

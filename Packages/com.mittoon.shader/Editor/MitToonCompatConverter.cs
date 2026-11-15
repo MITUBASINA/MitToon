@@ -129,6 +129,7 @@ namespace MitToon.Editor
             if (tm >= 3) notes.Add("屈折 / ファー / 宝石の描画は通常の描画として変換しました");
             var target = Shader.Find(MitToonShaderGUI.ShaderNameFor(outline, MitToonShaderGUI.IsTwoPassMode(mode), tess));
             if (target == null) { notes.Add("MitToon シェーダーが見つかりません"); return notes; }
+            m.SetFloat("_StencilSplit", 1);   // lilToon has its own outline / pre pass stencil, nothing to migrate
             m.shader = target;
 
             // everything MitToon has goes back to its default, then the shared settings are copied over

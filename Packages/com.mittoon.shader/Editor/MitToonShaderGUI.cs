@@ -1853,8 +1853,7 @@ namespace MitToon.Editor
             if (!Module("advanced", "詳細設定 (深度 / ステンシル)", "Advanced (Depth / Stencil)")) return;
             DebugPopup();
             Props("_ZWrite", "_ZTest", "_AlphaToMask", "_OffsetFactor", "_OffsetUnits");
-            Sub("ステンシル", "Stencil");
-            Props("_StencilRef", "_StencilReadMask", "_StencilWriteMask", "_StencilComp", "_StencilPass", "_StencilFail", "_StencilZFail");
+            DrawStencil();
             if (!collecting && !Searching)
             {
                 EditorGUILayout.Space(2);
@@ -1862,6 +1861,146 @@ namespace MitToon.Editor
                 me.EnableInstancingField();
             }
             EndModule();
+        }
+
+        // stencil, split like lilToon: normal (body), outline, transparent (the back faces a TwoPass shader draws first)
+        static readonly string[] StencilGroups = { "_Stencil", "_OutlineStencil", "_PreStencil" };
+        static string[] GroupProps(string g) => StencilNames.Select(n => g + n).ToArray();
+
+        // the simple mode of a group (lilToon): 0 normal, 1 writer, 2 reader, 3 reader (invert); -1 custom
+        static int StencilMode(Material m, string g)
+        {
+            if (!m.HasProperty(g + "Comp")) return 0;
+            float c = m.GetFloat(g + "Comp"), p = m.GetFloat(g + "Pass");
+            if (c == (float)CompareFunction.Always && p == (float)StencilOp.Keep) return 0;
+            if (c == (float)CompareFunction.Always && p == (float)StencilOp.Replace) return 1;
+            if (c == (float)CompareFunction.NotEqual && p == (float)StencilOp.Keep) return 2;
+            if (c == (float)CompareFunction.Equal && p == (float)StencilOp.Keep) return 3;
+            return -1;
+        }
+        static void SetStencilMode(Material m, string g, int mode, float r)
+        {
+            if (mode < 0 || !m.HasProperty(g + "Comp")) return;
+            var cmp = new[] { CompareFunction.Always, CompareFunction.Always, CompareFunction.NotEqual, CompareFunction.Equal };
+            var op = new[] { StencilOp.Keep, StencilOp.Replace, StencilOp.Keep, StencilOp.Keep };
+            m.SetFloat(g + "Comp", (float)cmp[mode]); m.SetFloat(g + "Pass", (float)op[mode]);
+            m.SetFloat(g + "Ref", r);
+            m.SetFloat(g + "ReadMask", 255); m.SetFloat(g + "WriteMask", 255);
+            m.SetFloat(g + "Fail", (float)StencilOp.Keep); m.SetFloat(g + "ZFail", (float)StencilOp.Keep);
+        }
+        static bool IsTwoPass(Material m) => m.shader != null && m.shader.name.Contains("TwoPass");
+
+        void DrawStencil()
+        {
+            var mat = (Material)me.target;
+            bool outl = IsOutlineShader(mat.shader), two = IsTwoPass(mat);
+            if (!collecting && !Searching)
+            {
+                Sub("ステンシル (簡易設定)", "Stencil (simple)");
+                var mats = me.targets.Cast<Material>().ToArray();
+                int Mode(Material x)
+                {
+                    int md = StencilMode(x, "_Stencil");
+                    // reader (fade): the body is normal, the transparent back faces only draw where the writer is
+                    if (IsTwoPass(x) && md == 0 && StencilMode(x, "_PreStencil") == 3) md = 4;
+                    return md;
+                }
+                int mode = Mode(mat);
+                var modes = new List<string> { T("通常", "Normal"), T("描画する側 (書き込み)", "Writer"), T("描画される側 (読み込み)", "Reader"), T("描画される側 (反転)", "Reader (invert)") };
+                if (two) modes.Add(T("描画される側 (フェード)", "Reader (fade)"));
+                int omode = outl ? StencilMode(mat, "_OutlineStencil") : 0;
+                EditorGUI.BeginChangeCheck();
+                EditorGUI.showMixedValue = mats.Any(x => Mode(x) != mode);
+                int nmode = EditorGUILayout.Popup(T("モード", "Mode"), mode, modes.ToArray());
+                int nomode = omode;
+                if (outl)
+                {
+                    EditorGUI.showMixedValue = mats.Any(x => StencilMode(x, "_OutlineStencil") != omode);
+                    nomode = EditorGUILayout.Popup(T("モード (アウトライン)", "Mode (outline)"), omode, modes.Take(4).ToArray());
+                }
+                EditorGUI.showMixedValue = false;
+                if (EditorGUI.EndChangeCheck())
+                {
+                    Undo.RecordObjects(mats, "MitToon Stencil");
+                    foreach (var m in mats)
+                    {
+                        float r = m.GetFloat("_StencilRef");
+                        if (r == 0 && (nmode > 0 || nomode > 0)) r = 1;
+                        if (nmode != mode && nmode >= 0)
+                        {
+                            SetStencilMode(m, "_Stencil", nmode == 4 ? 0 : nmode, nmode == 0 ? 0 : r);
+                            if (IsTwoPass(m))
+                            {
+                                SetStencilMode(m, "_PreStencil", nmode == 4 ? 3 : nmode, nmode == 0 ? 0 : r);
+                                if (m.HasProperty("_ZTest")) m.SetFloat("_ZTest", (float)(nmode == 4 ? CompareFunction.Less : CompareFunction.LessEqual));
+                            }
+                            // writers draw before readers (lilToon queues)
+                            int sq = m.shader.renderQueue;
+                            m.renderQueue = nmode == 0 ? -1 : nmode == 1 ? (sq > 2451 ? -1 : 2451) : (sq > 2452 ? -1 : 2452);
+                        }
+                        if (outl && nomode != omode && nomode >= 0) SetStencilMode(m, "_OutlineStencil", nomode, nomode == 0 ? 0 : r);
+                        m.SetFloat("_StencilSplit", 1);
+                        SyncKeywords(m);
+                        EditorUtility.SetDirty(m);
+                    }
+                }
+                if (mode != 0 || (outl && omode != 0))
+                {
+                    var rp = P("_StencilRef");
+                    EditorGUI.BeginChangeCheck();
+                    EditorGUI.showMixedValue = rp.hasMixedValue;
+                    int r = EditorGUILayout.IntSlider(T("参照値", "Ref"), Mathf.RoundToInt(rp.floatValue), 0, 255);
+                    EditorGUI.showMixedValue = false;
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        Undo.RecordObjects(mats, "MitToon Stencil Ref");
+                        foreach (var m in mats)
+                        {
+                            foreach (var g in StencilGroups) if (m.HasProperty(g + "Ref")) m.SetFloat(g + "Ref", r);
+                            EditorUtility.SetDirty(m);
+                        }
+                    }
+                }
+                Info("前髪透けなどは、目や眉を「描画する側」、前髪を「描画される側」にして同じ参照値にします。", "For see-through bangs: eyes / brows are the Writer, the bangs the Reader, with the same Ref.", MessageType.None);
+            }
+            Sub("ステンシル (通常)", "Stencil (normal)");
+            Props(GroupProps("_Stencil"));
+            if (collecting || Searching || outl)
+            {
+                Sub("ステンシル (アウトライン)", "Stencil (outline)");
+                Props(GroupProps("_OutlineStencil"));
+            }
+            if (collecting || Searching || two)
+            {
+                Sub("ステンシル (透過: 先に描く裏面)", "Stencil (transparent: back faces drawn first)");
+                Props(GroupProps("_PreStencil"));
+            }
+            if (!collecting && !Searching && GUILayout.Button(T("ステンシルをリセット", "Reset stencil")))
+            {
+                var mats = me.targets.Cast<Material>().ToArray();
+                Undo.RecordObjects(mats, "MitToon Stencil Reset");
+                foreach (var m in mats)
+                {
+                    foreach (var g in StencilGroups) SetStencilMode(m, g, 0, 0);
+                    if (m.HasProperty("_Outline2Silhouette")) m.SetFloat("_Outline2Silhouette", 0);
+                    m.SetFloat("_StencilSplit", 1);
+                    m.renderQueue = -1;
+                    SyncKeywords(m);
+                    EditorUtility.SetDirty(m);
+                }
+            }
+        }
+
+        // materials saved before the split: the outline and the transparent pass used the normal stencil, keep that
+        internal static void MigrateStencilSplit(Material m)
+        {
+            if (!m.HasProperty("_StencilSplit") || m.GetFloat("_StencilSplit") > 0.5f) return;
+            var main = MainStencil(m);
+            if (!StencilIsDefault(main))
+                foreach (var g in new[] { "_OutlineStencil", "_PreStencil" })
+                    if (m.HasProperty(g + "Comp") && StencilIsDefault(Group(m, g)))
+                        for (int i = 0; i < StencilNames.Length; i++) m.SetFloat(g + StencilNames[i], main[i]);
+            m.SetFloat("_StencilSplit", 1);
         }
 
         // ================================================================== material setup
@@ -1877,6 +2016,8 @@ namespace MitToon.Editor
                 if (MitToonCompatConverter.IsFakeShadowSource(oldShader)) MitToonCompatConverter.ApplyFakeShadow(material, fs);
                 return;
             }
+            // from another shader: its values are new, not an old MitToon layout to migrate
+            if (oldShader == null || !oldShader.name.StartsWith("MitToon/")) material.SetFloat("_StencilSplit", 1);
             if (MitToonCompatConverter.IsSource(oldShader))
             {
                 // switched from a compatible toon shader: keep the look (values read before the shader changes)
@@ -1894,7 +2035,8 @@ namespace MitToon.Editor
         // The material stencil is only taken over while it is unused (default) or already ours.
         const int SilhouetteBit = 128;
         static readonly string[] StencilNames = { "Ref", "ReadMask", "WriteMask", "Comp", "Pass", "Fail", "ZFail" };
-        static float[] MainStencil(Material m) => StencilNames.Select(n => m.GetFloat("_Stencil" + n)).ToArray();
+        static float[] Group(Material m, string g) => StencilNames.Select(n => m.GetFloat(g + n)).ToArray();
+        static float[] MainStencil(Material m) => Group(m, "_Stencil");
         static bool StencilIsDefault(float[] s) => s[3] == (float)CompareFunction.Always && s[4] == 0 && s[5] == 0 && s[6] == 0;
         static readonly float[] SilhouetteMain = { SilhouetteBit, 255, SilhouetteBit, (float)CompareFunction.Always, (float)StencilOp.Replace, 0, 0 };
         static readonly float[] SilhouetteOutline = { SilhouetteBit, SilhouetteBit, 0, (float)CompareFunction.NotEqual, 0, 0, 0 };
@@ -1904,23 +2046,34 @@ namespace MitToon.Editor
         internal static bool Outline2StencilUsable(Material m)
         {
             if (!m.HasProperty("_StencilComp")) return false;
-            var s = MainStencil(m);
-            return StencilIsDefault(s) || StencilIsSilhouette(s);
+            foreach (var g in StencilGroups)
+            {
+                if (!m.HasProperty(g + "Comp")) continue;
+                var s = Group(m, g);
+                if (!StencilIsDefault(s) && !StencilIsSilhouette(s)) return false;
+            }
+            return true;
         }
 
         static void SyncOutline2Stencil(Material m)
         {
             if (!m.HasProperty("_Outline2Silhouette") || !m.HasProperty("_StencilComp")) return;
             bool on = m.GetFloat("_Outline2Silhouette") > 0.5f;
-            var main = MainStencil(m);
-            if (on && Outline2StencilUsable(m)) main = SilhouetteMain;
-            else if (!on && StencilIsSilhouette(main)) main = DefaultMain;
-            bool sil = StencilIsSilhouette(main);
-            for (int i = 0; i < StencilNames.Length; i++)
+            bool usable = Outline2StencilUsable(m);
+            // the body, the 1st outline and the transparent back faces all mark the avatar
+            foreach (var g in StencilGroups)
             {
-                SetIfDiffers(m, "_Stencil" + StencilNames[i], main[i]);
-                SetIfDiffers(m, "_Outline2Stencil" + StencilNames[i], sil ? SilhouetteOutline[i] : main[i]);
+                if (!m.HasProperty(g + "Comp")) continue;
+                var v = Group(m, g);
+                if (on && usable) v = SilhouetteMain;
+                else if (!on && StencilIsSilhouette(v)) v = DefaultMain;
+                for (int i = 0; i < StencilNames.Length; i++) SetIfDiffers(m, g + StencilNames[i], v[i]);
             }
+            // without "only outside the body" the 2nd outline follows the outline stencil
+            var src = Group(m, m.HasProperty("_OutlineStencilComp") ? "_OutlineStencil" : "_Stencil");
+            bool sil = StencilIsSilhouette(MainStencil(m));
+            for (int i = 0; i < StencilNames.Length; i++)
+                SetIfDiffers(m, "_Outline2Stencil" + StencilNames[i], sil ? SilhouetteOutline[i] : src[i]);
         }
         static void SetIfDiffers(Material m, string p, float v) { if (m.HasProperty(p) && m.GetFloat(p) != v) m.SetFloat(p, v); }
 
@@ -1939,6 +2092,7 @@ namespace MitToon.Editor
                 if (On("_UseRim") || On("_UseRim2") || On("_UseRim3")) m.EnableKeyword("_LUMI_RIM"); else m.DisableKeyword("_LUMI_RIM");
             }
             m.DisableKeyword("_LUMI_RIMSHADE");   // removed feature, cleared from old materials
+            MigrateStencilSplit(m);
             SyncOutline2Stencil(m);
             // emission 1-4 are separate modules sharing one keyword; each has its own AudioLink
             bool On(string p) => m.HasProperty(p) && m.GetFloat(p) > 0.5f;
