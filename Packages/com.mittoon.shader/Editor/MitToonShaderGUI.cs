@@ -1824,6 +1824,17 @@ namespace MitToon.Editor
             }
             if (!collecting && !Searching && GUILayout.Button(T("このマテリアルのメッシュにスムーズ法線をベイク (頂点カラー)", "Bake smoothed normals to vertex colors (meshes using this material)")))
                 MitToonOutlineBaker.BakeForMaterials(me.targets.Cast<Material>().ToArray());
+            if (!collecting && !Searching && mat.HasProperty("_OutlineWidthBaked") && mat.GetFloat("_OutlineNormalSource") > 0.5f)
+            {
+                if (mat.GetFloat("_OutlineNormalSource") < 1.5f && MitToonOutlineBaker.NeedsTangents(mat))
+                    Info("法線マップなど接線を使う機能が有効です。接線にスムーズ法線を焼いたメッシュでは表示が崩れるので、もう一度ベイクしてください (頂点カラーに焼き直します)。",
+                         "A feature that needs tangents is on. Meshes with the smooth normal baked into the tangent show it wrong: bake again (it moves to the vertex color).", MessageType.Warning);
+                bool masked = mat.GetTexture("_OutlineWidthMask") != null || mat.GetFloat("_OutlineVertexColorWidth") > 0;
+                if (masked && mat.GetFloat("_OutlineWidthBaked") < 0.5f)
+                    Info("幅マスクがあるので、もう一度ベイクしてください。UV の継ぎ目で線が切れなくなります。", "A width mask is set: bake again so the outline does not tear at UV seams.", MessageType.Warning);
+                else if (mat.GetFloat("_OutlineWidthBaked") > 0.5f)
+                    Info("幅マスクはベイク時の値を使っています。マスクを変えたらもう一度ベイクしてください。", "The width mask is used as baked. Bake again after changing it.", MessageType.None);
+            }
             EndModule();
         }
 

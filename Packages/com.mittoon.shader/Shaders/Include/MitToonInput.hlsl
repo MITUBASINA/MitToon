@@ -189,7 +189,7 @@ CBUFFER_START(UnityPerMaterial)
     float4 _SkyTopColor, _SkyHorizonColor, _SkyGroundColor;
     float  _WorldAdapt, _WorldAdaptTarget, _WorldAdaptRange, _DebugView;
     // v1.2: double outline
-    float  _Outline2Width, _Outline2MainBlend, _Outline2EnableLighting, _Outline2ZBias;
+    float  _Outline2Width, _Outline2MainBlend, _Outline2EnableLighting, _Outline2ZBias, _Outline2Silhouette;
     float4 _Outline2Color;
     // v1.3: richness
     float  _RichShadowSaturation, _RichShadowHue, _RichColorDepth, _RichTerminatorWidth, _RichWrap, _RichAmbientRim, _RichAmbientRimMode;
@@ -210,7 +210,7 @@ CBUFFER_START(UnityPerMaterial)
     float4 _InkUnderDir;
     float  _FPSTarget, _FPSRate, _FPSAmp, _FPSFreq, _FPSNormal, _FPSSnap, _FPSWidthJitter;
     // Outline
-    float  _OutlineWidth, _OutlineVertexColorWidth, _OutlineFixWidth, _OutlineZBias, _OutlineEnableLighting, _OutlineMainBlend;
+    float  _OutlineWidth, _OutlineVertexColorWidth, _OutlineWidthBaked, _OutlineFixWidth, _OutlineZBias, _OutlineEnableLighting, _OutlineMainBlend;
     float4 _OutlineColor;
 CBUFFER_END
 // set globally by the VRChat client (0 = normal view)

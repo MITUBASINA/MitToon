@@ -24,14 +24,9 @@ namespace MitToon.Editor
         public static void BakeSelection()
         {
             if (!EnsureBakeDir()) return;
-            int count = 0;
-            var done = new HashSet<Renderer>();
-            foreach (var go in Selection.gameObjects)
-            {
-                foreach (var r in go.GetComponentsInChildren<Renderer>(true))
-                    if (done.Add(r) && BakeRenderer(r)) count++;
-            }
-            ReportBake(count);
+            var rends = Selection.gameObjects.SelectMany(go => go.GetComponentsInChildren<Renderer>(true)).Distinct()
+                .Where(r => r is SkinnedMeshRenderer || r.GetComponent<MeshFilter>() != null).ToList();
+            ReportBake(BakeAll(rends));
         }
 
         // Inspector button: bakes every scene mesh that uses the material
@@ -41,14 +36,56 @@ namespace MitToon.Editor
             if (rends.Count == 0) { MitToonSceneUtil.NotFound(); return; }
             if (!MitToonSceneUtil.Confirm("次のメッシュにスムーズ法線をベイクします (頂点カラーを上書き)。", "Bake smoothed normals into:", rends)) return;
             if (!EnsureBakeDir()) return;
-            ReportBake(rends.Count(BakeRenderer));
+            ReportBake(BakeAll(rends));
         }
 
-        static bool BakeRenderer(Renderer r)
+        // features that read the mesh tangent; a renderer whose materials use none of them gets the smooth normal in the tangent
+        public static bool NeedsTangents(Material m)
         {
+            if (m == null || m.shader == null || !m.shader.name.StartsWith("MitToon/")) return m != null;   // other shaders: keep their tangents
+            bool On(string p) => m.HasProperty(p) && m.GetFloat(p) > 0.5f;
+            float F(string p) => m.HasProperty(p) ? m.GetFloat(p) : 0;
+            return On("_UseBumpMap") || On("_UseBump2") || On("_UseDetail") || On("_UseParallax") || On("_UseAniso") || On("_UseMatCapBump")
+                || (F("_ClearCoatNormalScale") > 0.001f && m.HasProperty("_ClearCoatNormalMap") && m.GetTexture("_ClearCoatNormalMap") != null)
+                || (F("_EyeParallax") > 0.0001f && On("_UseEyeGuard"));
+        }
+
+        // Smooth normals go into the tangent when nothing needs the tangent: skinned like the normal, so both sides of a hard
+        // edge stay together when bones bend (PhysBones). The vertex color form is decoded through each vertex's own
+        // tangent frame, and blended (linear) skinning bends those frames differently, which opens cracks in thick outlines.
+        // A material shared with a renderer that needs its tangents keeps every renderer on the vertex color form.
+        static int BakeAll(List<Renderer> rends)
+        {
+            var tangentMode = rends.ToDictionary(r => r, r => !r.sharedMaterials.Any(NeedsTangents));
+            for (bool changed = true; changed;)
+            {
+                changed = false;
+                foreach (var m in rends.SelectMany(r => r.sharedMaterials).Where(m => m != null).Distinct())
+                {
+                    var users = rends.Where(r => r.sharedMaterials.Contains(m)).ToList();
+                    if (users.Any(r => !tangentMode[r]) && users.Any(r => tangentMode[r]))
+                    {
+                        foreach (var r in users) tangentMode[r] = false;
+                        changed = true;
+                    }
+                }
+            }
+            int count = rends.Count(r => BakeRenderer(r, tangentMode[r]));
+            foreach (var m in rends.SelectMany(r => r.sharedMaterials).Where(m => m != null && m.HasProperty("_OutlineNormalSource")).Distinct())
+            {
+                Undo.RecordObject(m, "MitToon Bake Smooth Normals");
+                m.SetFloat("_OutlineNormalSource", rends.Where(r => r.sharedMaterials.Contains(m)).All(r => tangentMode[r]) ? 1 : 2);
+                EditorUtility.SetDirty(m);
+            }
+            return count;
+        }
+
+        static bool BakeRenderer(Renderer r, bool tangentMode)
+        {
+            var mats = r.sharedMaterials;
             if (r is SkinnedMeshRenderer smr)
             {
-                var m = Bake(smr.sharedMesh);
+                var m = Bake(smr.sharedMesh, mats, tangentMode);
                 if (m == null) return false;
                 Undo.RecordObject(smr, "MitToon Bake Smooth Normals");
                 smr.sharedMesh = m;
@@ -56,7 +93,7 @@ namespace MitToon.Editor
             }
             var mf = r.GetComponent<MeshFilter>();
             if (mf == null) return false;
-            var mm = Bake(mf.sharedMesh);
+            var mm = Bake(mf.sharedMesh, mats, tangentMode);
             if (mm == null) return false;
             Undo.RecordObject(mf, "MitToon Bake Smooth Normals");
             mf.sharedMesh = mm;
@@ -66,17 +103,68 @@ namespace MitToon.Editor
         static void ReportBake(int count)
         {
             EditorUtility.DisplayDialog("MitToon", count > 0
-                ? $"{count} 個のメッシュにベイクしました。\nアウトラインの「法線のソース」を Vertex Color にしてください。\n(頂点カラーを上書きするため「頂点カラーを乗算」は OFF のまま使ってください)"
+                ? $"{count} 個のメッシュにベイクしました。アウトラインの「法線のソース」も設定しました。\n(法線マップなどを使わないメッシュは接線に、使うメッシュは頂点カラーに焼いています)"
                 : "ベイクできるメッシュが見つかりません (法線と接線が必要です)。", "OK");
         }
 
-        static Mesh Bake(Mesh src)
+        // width of the outline per vertex as the shader computes it from the material (mask x vertex color A), or -1 when nothing varies
+        static float[] Widths(Mesh src, Material[] mats, Color[] old)
+        {
+            var uv = src.uv;
+            var w = Enumerable.Repeat(1f, src.vertexCount).ToArray();
+            bool any = false;
+            var cache = new Dictionary<Texture, Texture2D>();
+            for (int sub = 0; sub < src.subMeshCount && sub < mats.Length; sub++)
+            {
+                var m = mats[sub];
+                if (m == null || !m.HasProperty("_OutlineWidthMask")) continue;
+                var tex = m.GetTexture("_OutlineWidthMask");
+                float vcw = m.HasProperty("_OutlineVertexColorWidth") ? m.GetFloat("_OutlineVertexColorWidth") : 0;
+                if (tex == null && vcw <= 0) continue;
+                any = true;
+                Texture2D rd = null;
+                if (tex != null && !cache.TryGetValue(tex, out rd)) cache[tex] = rd = Readable(tex);
+                foreach (int i in src.GetTriangles(sub).Distinct())
+                {
+                    float x = 1;
+                    if (rd != null && uv.Length == w.Length) x = rd.GetPixelBilinear(uv[i].x, uv[i].y).r;   // like the shader: no tiling
+                    float a = old.Length == w.Length ? old[i].a : 1f;
+                    w[i] = x * Mathf.Lerp(1, a, vcw);
+                }
+            }
+            foreach (var t in cache.Values) if (t != null) Object.DestroyImmediate(t);
+            return any ? w : null;
+        }
+
+        static Texture2D Readable(Texture tex)
+        {
+            var rt = RenderTexture.GetTemporary(tex.width, tex.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            Graphics.Blit(tex, rt);
+            var rd = new Texture2D(tex.width, tex.height, TextureFormat.RGBA32, false, true);
+            var prev = RenderTexture.active; RenderTexture.active = rt;
+            rd.ReadPixels(new Rect(0, 0, tex.width, tex.height), 0, 0); rd.Apply();
+            RenderTexture.active = prev; RenderTexture.ReleaseTemporary(rt);
+            return rd;
+        }
+
+        static Mesh Bake(Mesh src, Material[] mats = null, bool tangentMode = false)
         {
             if (src == null) return null;
             var normals = src.normals;
             var tangents = src.tangents;
             var verts = src.vertices;
-            if (normals.Length == 0 || tangents.Length == 0) return null;
+            if (normals.Length == 0) return null;
+            // a mesh baked into its tangent before: get real tangents back
+            bool hadSmoothTangent = tangents.Length == verts.Length && verts.Length > 0
+                && Enumerable.Range(0, verts.Length).Average(i => Mathf.Abs(Vector3.Dot(normals[i].normalized, ((Vector3)tangents[i]).normalized))) > 0.5f;
+            if (tangents.Length != verts.Length || hadSmoothTangent)
+            {
+                if (src.uv.Length != verts.Length) return null;
+                var tmp = Object.Instantiate(src);
+                tmp.RecalculateTangents();
+                tangents = tmp.tangents;
+                Object.DestroyImmediate(tmp);
+            }
 
             var sum = new Dictionary<Vector3Int, Vector3>();
             Vector3Int Key(Vector3 p) => new Vector3Int(Mathf.RoundToInt(p.x * 10000), Mathf.RoundToInt(p.y * 10000), Mathf.RoundToInt(p.z * 10000));
@@ -87,7 +175,18 @@ namespace MitToon.Editor
                 sum[k] = s + normals[i];
             }
             var old = src.colors;
+            // the width (mask x vertex color A) averaged over vertices on one position, so UV seams do not tear the outline
+            var widths = mats != null ? Widths(src, mats, old) : null;
+            var wsum = new Dictionary<Vector3Int, (float s, int n)>();
+            if (widths != null)
+                for (int i = 0; i < verts.Length; i++)
+                {
+                    var k = Key(verts[i]);
+                    wsum.TryGetValue(k, out var e);
+                    wsum[k] = (e.s + widths[i], e.n + 1);
+                }
             var colors = new Color[verts.Length];
+            var outTangents = new Vector4[verts.Length];
             for (int i = 0; i < verts.Length; i++)
             {
                 var n = normals[i].normalized;
@@ -96,12 +195,44 @@ namespace MitToon.Editor
                 var sm = sum[Key(verts[i])].normalized;
                 var ts = new Vector3(Vector3.Dot(sm, t), Vector3.Dot(sm, b), Vector3.Dot(sm, n));
                 float a = old.Length == verts.Length ? old[i].a : 1f;
-                colors[i] = new Color(ts.x * 0.5f + 0.5f, ts.y * 0.5f + 0.5f, ts.z * 0.5f + 0.5f, a);
+                if (widths != null) { var e = wsum[Key(verts[i])]; a = e.s / e.n; }
+                if (tangentMode)
+                {
+                    // tangent = smooth normal; the color keeps its RGB, A holds the width as above
+                    var oc = old.Length == verts.Length && !hadSmoothTangent ? old[i] : Color.white;
+                    colors[i] = new Color(oc.r, oc.g, oc.b, a);
+                    outTangents[i] = new Vector4(sm.x, sm.y, sm.z, 1);
+                }
+                else
+                {
+                    colors[i] = new Color(ts.x * 0.5f + 0.5f, ts.y * 0.5f + 0.5f, ts.z * 0.5f + 0.5f, a);
+                    outTangents[i] = tangents[i];
+                }
             }
 
+            if (mats != null)
+                foreach (var m in mats)
+                    if (m != null && m.HasProperty("_OutlineWidthBaked"))
+                    {
+                        Undo.RecordObject(m, "MitToon Bake Smooth Normals");
+                        m.SetFloat("_OutlineWidthBaked", widths != null ? 1 : 0);
+                        EditorUtility.SetDirty(m);
+                    }
+
+            // baking a baked mesh again (new mask, older version): update it in place instead of stacking copies
+            if (AssetDatabase.GetAssetPath(src).StartsWith(BakeDir + "/"))
+            {
+                Undo.RecordObject(src, "MitToon Bake Smooth Normals");
+                src.colors = colors;
+                src.tangents = outTangents;
+                EditorUtility.SetDirty(src);
+                AssetDatabase.SaveAssets();
+                return src;
+            }
             var dst = Object.Instantiate(src);
             dst.name = src.name + "_MitToonSmooth";
             dst.colors = colors;
+            dst.tangents = outTangents;
             var path = AssetDatabase.GenerateUniqueAssetPath($"{BakeDir}/{dst.name}.asset");
             AssetDatabase.CreateAsset(dst, path);
             AssetDatabase.SaveAssets();

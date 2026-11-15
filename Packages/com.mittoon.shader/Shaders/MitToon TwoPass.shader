@@ -827,6 +827,7 @@ Shader "MitToon/MitToon TwoPass"
         _OutlineTex ("テクスチャ|Texture", 2D) = "white" {}
         _OutlineWidthMask ("幅マスク (R)|Width Mask (R)", 2D) = "white" {}
         _OutlineVertexColorWidth ("頂点カラー A で幅|Width by Vertex Color A", Range(0, 1)) = 0
+        [HideInInspector] _OutlineWidthBaked ("Width baked in vertex color A (smooth normal bake)", Float) = 0
         _OutlineFixWidth ("画面上の太さを固定|Fixed Screen Width", Range(0, 1)) = 0.5
         _OutlineZBias ("Z オフセット (cm)|Z Bias (cm)", Range(-5, 5)) = 0
         _OutlineMainBlend ("メインカラーの乗算|Multiply Main Color", Range(0, 1)) = 0.8

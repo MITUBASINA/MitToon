@@ -438,8 +438,14 @@ v2fOutline LumiOutlineVertex(appdata v, float widthCm, float zBiasCm)
 #endif
     widthCm *= LumiInkWeight(v.vertex.xyz, v.normal);
     float width = widthCm * 0.01; // cm -> m
-    width *= _OutlineWidthMask.SampleLevel(sampler_trilinear_repeat, v.uv0, 0).r;
-    width *= lerp(1, v.color.a, _OutlineVertexColorWidth);
+    // the smooth normal bake also stores mask x vertex color width, averaged over vertices on one position:
+    // sampled per UV, a mask tears the outline at UV seams (the two sides read different texels)
+    if (_OutlineWidthBaked > 0.5 && _OutlineNormalSource > 0.5) width *= v.color.a;
+    else
+    {
+        width *= _OutlineWidthMask.SampleLevel(sampler_trilinear_repeat, v.uv0, 0).r;
+        width *= lerp(1, v.color.a, _OutlineVertexColorWidth);
+    }
     float3 posWS = LumiObjectToWorld(v.vertex.xyz);
     posWS += LumiWobbleWS(posWS, v);
     float3 nOS = v.normal;
@@ -480,7 +486,8 @@ v2fOutline LumiOutlineVertex(appdata v, float widthCm, float zBiasCm)
 }
 v2fOutline vertOutline(appdata v)  { return LumiOutlineVertex(v, _OutlineWidth, _OutlineZBias); }
 // 2nd (outer) outline: drawn outside the 1st one (white + dark double line, glow edge ...)
-v2fOutline vertOutline2(appdata v) { return LumiOutlineVertex(v, _Outline2Width > 0 ? _OutlineWidth + _Outline2Width : 0, _OutlineZBias + _Outline2ZBias); }
+// "only outside the body" hides it with the stencil: the 1st outline's Z bias would only push it behind nearby objects (gaps), so only its own applies
+v2fOutline vertOutline2(appdata v) { return LumiOutlineVertex(v, _Outline2Width > 0 ? _OutlineWidth + _Outline2Width : 0, _OutlineZBias * (1.0 - _Outline2Silhouette) + _Outline2ZBias); }
 
 float4 LumiOutlineColor(v2fOutline i, float4 color, float mainBlend, float lighting)
 {
