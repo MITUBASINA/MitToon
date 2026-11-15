@@ -535,7 +535,6 @@ namespace MitToon.Editor
 
             Category("影", "Shadows");
             DrawShadow();
-            DrawScreenSpace();
             DrawFace();
             DrawEyeGuard();
 
@@ -554,6 +553,12 @@ namespace MitToon.Editor
             Category("マットキャップ & リム", "MatCap & Rim");
             DrawMatCap();
             DrawRim();
+
+            Category("深度ライト", "Depth Light");
+            DrawDepthLight();
+            DrawScreenSpace();
+            DrawDepthRim();
+            DrawOffsetRim();
 
             Category("発光", "Emission");
             DrawEmission();
@@ -1271,13 +1276,31 @@ namespace MitToon.Editor
                 Props("_ContactShadowJitter");
                 EndModule();
             }
-            if (!collecting && !Searching && (F("_UseSSAO") > 0.5f || F("_UseContactShadow") > 0.5f || F("_UseSoftShadow") > 0.5f || F("_UseDepthShadow") > 0.5f))
+            EndModule();
+        }
+
+        // depth effects need _CameraDepthTexture: only rendered while a shadowed directional light exists (same as Poiyomi's DepthGet)
+        void DrawDepthLight()
+        {
+            if (!Module("depthlight", "深度ライト (このグループの効果をどのワールドでも使う)", "Depth Light (use this group in every world)")) return;
+            if (!collecting && !Searching)
             {
-                Info("カメラの深度テクスチャを使います。影付きのディレクショナルライトが無いワールドでは深度が作られず、これらの効果は自動でオフになります。どのワールドでも使いたい場合は、下のボタンで深度ライトを追加してください (ライト数 +1)。ただし深度ライトがあると、見ている人の側でワールド全体の深度をもう一度描くため、重いワールドでは FPS が大きく下がります。",
-                     "Uses the camera depth texture. Worlds without a shadowed directional light have no depth, and these effects then turn off by themselves. To use them in every world, add a depth light with the button below (+1 light). Note: with the depth light, viewers render the depth of the whole world once more, which costs a lot of FPS in heavy worlds.");
+                Info("カメラの深度テクスチャを使います。影付きのディレクショナルライトが無いワールドでは深度が作られず、これらの効果は自動でオフになります。どのワールドでも使いたい場合は、下のボタンで深度ライトを追加してください (ライト数 +1。Poiyomi の DepthGet と同じ仕組みです)。ただし深度ライトがあると、見ている人の側でワールド全体の深度をもう一度描くため、重いワールドでは FPS が大きく下がります。",
+                 "Uses the camera depth texture. Worlds without a shadowed directional light have no depth, and these effects then turn off by themselves. To use them in every world, add a depth light with the button below (+1 light, the same trick as Poiyomi's DepthGet). Note: with the depth light, viewers render the depth of the whole world once more, which costs a lot of FPS in heavy worlds.");
                 if (GUILayout.Button(T("このマテリアルのアバターに深度ライトを追加", "Add Depth Light to avatars using this material")))
                     MitToonDepthLight.AddForMaterials(me.targets.Cast<Material>().ToArray());
             }
+            EndModule();
+        }
+
+        // constant width mode of rim light 1 (reads the depth texture)
+        void DrawDepthRim()
+        {
+            if (!When(!Compat) || !Module("depthrim", "深度リム (ゲーム風の一定幅リム)", "Depth Rim (constant width)")) return;
+            Prop("_RimMode");
+            if (When(F("_RimMode") > 0.5f)) Props("_RimDepthWidth", "_RimDepthThreshold");
+            Info("リムライト1 の形を、深度テクスチャで拾う一定幅に切り替えます。色や強さはリムライト1 の設定を使います (リムライト1 をオンにしてください)。",
+                 "Switches the shape of Rim Light 1 to a constant width taken from the depth texture. Color and strength come from Rim Light 1 (turn it on).", MessageType.None);
             EndModule();
         }
 
@@ -1513,6 +1536,7 @@ namespace MitToon.Editor
                     Props("_RimBorder", "_RimBlur", "_RimFresnelPower", "_RimLightDir");
                     if (When(compat)) Prop("_RimDirRange");
                     Props("_RimShadowMask", "_RimMainStrength", "_RimNormalStrength", "_RimEnableLighting", "_RimBackfaceMask");
+                    if (When(!compat)) Prop("_RimEnvLight");
                     if (When(compat))
                     {
                         Sub("影側のリム", "Shadow Side Rim");
@@ -1520,11 +1544,7 @@ namespace MitToon.Editor
                     }
                     RimEmission("_Rim", compat);
                     if (When(!compat))
-                    {
-                        Sub("深度リム (ゲーム風の一定幅リム)", "Depth Rim (constant width)");
-                        Prop("_RimMode");
-                        if (When(F("_RimMode") > 0.5f)) Props("_RimDepthWidth", "_RimDepthThreshold");
-                    }
+                        Info("深度リム (一定幅のリム) の切り替えは「深度ライト」グループにあります。", "The depth rim (constant width) switch is in the Depth Light group.", MessageType.None);
                     EndModule();
                 }
                 for (int n = 2; n <= 3; n++)
@@ -1538,6 +1558,7 @@ namespace MitToon.Editor
                         if (When(!compat && F(r + "LitSideOnly") > 0)) Prop(r + "LitSideBlur");
                         Props(r + "Border", r + "Blur", r + "FresnelPower", r + "LightDir", r + "ShadowMask", r + "MainStrength",
                               r + "NormalStrength", r + "EnableLighting", r + "BackfaceMask");
+                        if (When(!compat)) Prop(r + "EnvLight");
                         RimEmission(r, compat);
                         EndModule();
                     }
@@ -1550,6 +1571,10 @@ namespace MitToon.Editor
                 }
                 EndModule();
             }
+        }
+
+        void DrawOffsetRim()
+        {
             if (Module("offsetrim", "オフセットリムライト", "Offset Rim Light", "_UseOffsetRim"))
             {
                 Props("_OffsetRimColor", "_OffsetRimStrength", "_OffsetRimDirMode");
@@ -1803,6 +1828,10 @@ namespace MitToon.Editor
             Tex("_OutlineWidthMask", "_OutlineWidth");
             Props("_OutlineNormalSource", "_OutlineVertexColorWidth", "_OutlineFixWidth", "_OutlineZBias", "_OutlineMainBlend", "_OutlineEnableLighting");
             Props("_OutlineFixDistance", "_OutlineFOVCompensate");
+            Sub("ハイライト", "Highlight");
+            Props("_OutlineLitColor", "_OutlineLitApplyTex", "_OutlineLitScale", "_OutlineLitOffset", "_OutlineLitShadowReceive");
+            Info("ライトが当たる側のアウトラインをハイライト色にします。色の A が強さで、0 なら無効です。スケールとオフセットで範囲を調整します (lilToon と同じ値が使えます)。",
+                 "Paints the lit side of the outline in the highlight color. Color A is the strength (0 = off). Scale and Offset set the range (same values as lilToon).", MessageType.None);
             if (Module("inkline", "入り抜き輪郭線 (筆の強弱)", "Ink Line (brush taper)", "_UseInkLine", true))
             {
                 Props("_InkStrength", "_InkWidth", "_InkAngle", "_InkGap", "_InkTaper", "_InkMin", "_InkUnder");

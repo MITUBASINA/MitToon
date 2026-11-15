@@ -342,6 +342,7 @@ Shader "MitToon/MitToon Tessellation"
         _RimMainStrength ("メインカラーの乗算|Multiply Main Color", Range(0, 1)) = 0
         _RimNormalStrength ("ノーマルマップ強度|Normal Map Strength", Range(0, 1)) = 1
         _RimEnableLighting ("ライトの色を反映|Apply Lighting", Range(0, 1)) = 1
+        _RimEnvLight ("環境光の向きを反映|Follow Ambient Direction", Range(0, 1)) = 1
         _RimBackfaceMask ("裏面で消す|Backface Mask", Range(0, 1)) = 1
         [Enum(Fresnel,0,Screen Space Depth,1)] _RimMode ("リムの方式|Rim Mode", Float) = 0
         _RimDepthWidth ("深度リムの幅 (cm)|Depth Rim Width (cm)", Range(0, 3)) = 0.4
@@ -365,6 +366,7 @@ Shader "MitToon/MitToon Tessellation"
         _Rim2MainStrength ("メインカラーの乗算|Multiply Main Color", Range(0, 1)) = 0
         _Rim2NormalStrength ("ノーマルマップ強度|Normal Map Strength", Range(0, 1)) = 1
         _Rim2EnableLighting ("ライトの色を反映|Apply Lighting", Range(0, 1)) = 1
+        _Rim2EnvLight ("環境光の向きを反映|Follow Ambient Direction", Range(0, 1)) = 1
         _Rim2BackfaceMask ("裏面で消す|Backface Mask", Range(0, 1)) = 1
         [Enum(Add,0,Screen,1,Multiply,2,Replace,3)] _Rim2BlendMode ("合成モード|Blend Mode", Float) = 0
         _Rim2LitSideOnly ("光の当たる側にだけ出す|Lit Side Only", Range(0, 1)) = 0
@@ -385,6 +387,7 @@ Shader "MitToon/MitToon Tessellation"
         _Rim3MainStrength ("メインカラーの乗算|Multiply Main Color", Range(0, 1)) = 0
         _Rim3NormalStrength ("ノーマルマップ強度|Normal Map Strength", Range(0, 1)) = 1
         _Rim3EnableLighting ("ライトの色を反映|Apply Lighting", Range(0, 1)) = 1
+        _Rim3EnvLight ("環境光の向きを反映|Follow Ambient Direction", Range(0, 1)) = 1
         _Rim3BackfaceMask ("裏面で消す|Backface Mask", Range(0, 1)) = 1
         [Enum(Add,0,Screen,1,Multiply,2,Replace,3)] _Rim3BlendMode ("合成モード|Blend Mode", Float) = 0
         _Rim3LitSideOnly ("光の当たる側にだけ出す|Lit Side Only", Range(0, 1)) = 0
@@ -644,8 +647,8 @@ Shader "MitToon/MitToon Tessellation"
         _OffsetRimThreshold ("深度差のしきい値 (m)|Depth Threshold (m)", Range(0.005, 1)) = 0.05
         _OffsetRimSoftness ("柔らかさ|Softness", Range(0, 1)) = 0.5
         _OffsetRimFacing ("輪郭付近に制限|Limit to Silhouette", Range(0, 1)) = 0.3
-        _OffsetRimLightInfluence ("ライト色の影響|Light Influence", Range(0, 1)) = 1
-        _OffsetRimEnvInfluence ("環境光の影響|Ambient Influence", Range(0, 1)) = 0.3
+        _OffsetRimLightInfluence ("明るさを光に合わせる|Brightness Follows Light", Range(0, 1)) = 1
+        _OffsetRimEnvInfluence ("環境光の色に染まる|Take Ambient Colour", Range(0, 1)) = 0.3
         _OffsetRimShadowMask ("影で消す|Shadow Mask", Range(0, 1)) = 0.5
         _OffsetRimAlbedo ("メインカラーの乗算|Multiply Main Color", Range(0, 1)) = 0.3
         _OffsetRimEmission ("発光にする (ライトや影の影響を受けない)|Emissive (ignores lights and shadows)", Range(0, 1)) = 0
@@ -832,6 +835,11 @@ Shader "MitToon/MitToon Tessellation"
         _OutlineZBias ("Z オフセット (cm)|Z Bias (cm)", Range(-5, 5)) = 0
         _OutlineMainBlend ("メインカラーの乗算|Multiply Main Color", Range(0, 1)) = 0.8
         _OutlineEnableLighting ("ライトの色を反映|Apply Lighting", Range(0, 1)) = 1
+        [HDR] _OutlineLitColor ("ハイライト色 (A = 強さ)|Highlight Color (A = strength)", Color) = (1, 0.2, 0, 0)
+        [ToggleUI] _OutlineLitApplyTex ("ハイライトにメインカラーを使う|Highlight uses Main Color", Float) = 0
+        _OutlineLitScale ("ハイライトのスケール|Highlight Scale", Float) = 10
+        _OutlineLitOffset ("ハイライトのオフセット|Highlight Offset", Float) = -8
+        [ToggleUI] _OutlineLitShadowReceive ("ハイライトに影を落とす|Highlight Receives Shadow", Float) = 0
         [Enum(Normal,0,Tangent,1,Vertex Color (baked smooth),2)] _OutlineNormalSource ("法線のソース|Normal Source", Float) = 0
     }
 

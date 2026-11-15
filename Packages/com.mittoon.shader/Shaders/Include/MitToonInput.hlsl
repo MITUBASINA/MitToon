@@ -191,6 +191,9 @@ CBUFFER_START(UnityPerMaterial)
     // v1.2: double outline
     float  _Outline2Width, _Outline2MainBlend, _Outline2EnableLighting, _Outline2ZBias, _Outline2Silhouette;
     float4 _Outline2Color;
+    float  _RimEnvLight, _Rim2EnvLight, _Rim3EnvLight;
+    float4 _OutlineLitColor;
+    float  _OutlineLitApplyTex, _OutlineLitScale, _OutlineLitOffset, _OutlineLitShadowReceive;
     // v1.3: richness
     float  _RichShadowSaturation, _RichShadowHue, _RichColorDepth, _RichTerminatorWidth, _RichWrap, _RichAmbientRim, _RichAmbientRimMode;
     float  _RichSoftSpec, _RichSoftSpecRoughness, _RichMicroContrast, _RichGloss;

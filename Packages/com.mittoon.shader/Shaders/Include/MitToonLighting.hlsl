@@ -659,6 +659,16 @@ float LumiScreenSpaceValidity(LumiInputData d)
     return v;
 }
 
+// light reaching a rim: the ambient (SH / Light Volumes) along the rim normal plus the lights on that side,
+// so a rim brightens and takes the colour of the side the environment light comes from
+float3 LumiRimEnvLight(LumiGI gi, LumiCtx c, float3 mainColor, float3 N, float amount)
+{
+    if (amount <= 0.0) return c.litLight;
+    float w = saturate(dot(N, c.toonDir) * 0.5 + 0.5);
+    float3 l = LumiLimitLight((mainColor + gi.autoKey) * w + LumiGIIrradiance(gi, N));
+    return lerp(c.litLight, l, amount);
+}
+
 float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out LumiCtx c)
 {
     c = (LumiCtx)0;
@@ -1048,7 +1058,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         float4 rt = LUMI_SAMPLE(_RimTex, uv);
         float3 rb = LumiRimHue(_RimColor.rgb, _RimHueSpeed) * rt.rgb * lerp(1, s.albedo, _RimMainStrength);
         float ra = saturate(r) * _RimColor.a * rt.a;
-        col = LumiRimBlend(col, rb * lerp(1, c.litLight, _RimEnableLighting), ra * (1.0 - _RimEmission), _RimBlendMode);
+        col = LumiRimBlend(col, rb * lerp(1, LumiRimEnvLight(gi, c, mainColor, Nr, _RimEnvLight), _RimEnableLighting), ra * (1.0 - _RimEmission), _RimBlendMode);
         rimEmis += rb * (ra * _RimEmission * LumiRimBlink(_RimEmissionStrength, _RimBlink));
     }
     [branch] if (_UseRim2 > 0.5)
@@ -1059,7 +1069,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         float4 rt = LUMI_SAMPLE(_Rim2Tex, uv);
         float3 rb = LumiRimHue(_Rim2Color.rgb, _Rim2HueSpeed) * rt.rgb * lerp(1, s.albedo, _Rim2MainStrength);
         float ra = saturate(r) * _Rim2Color.a * rt.a;
-        col = LumiRimBlend(col, rb * lerp(1, c.litLight, _Rim2EnableLighting), ra * (1.0 - _Rim2Emission), _Rim2BlendMode);
+        col = LumiRimBlend(col, rb * lerp(1, LumiRimEnvLight(gi, c, mainColor, Nr, _Rim2EnvLight), _Rim2EnableLighting), ra * (1.0 - _Rim2Emission), _Rim2BlendMode);
         rimEmis += rb * (ra * _Rim2Emission * LumiRimBlink(_Rim2EmissionStrength, _Rim2Blink));
     }
     [branch] if (_UseRim3 > 0.5)
@@ -1070,7 +1080,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         float4 rt = LUMI_SAMPLE(_Rim3Tex, uv);
         float3 rb = LumiRimHue(_Rim3Color.rgb, _Rim3HueSpeed) * rt.rgb * lerp(1, s.albedo, _Rim3MainStrength);
         float ra = saturate(r) * _Rim3Color.a * rt.a;
-        col = LumiRimBlend(col, rb * lerp(1, c.litLight, _Rim3EnableLighting), ra * (1.0 - _Rim3Emission), _Rim3BlendMode);
+        col = LumiRimBlend(col, rb * lerp(1, LumiRimEnvLight(gi, c, mainColor, Nr, _Rim3EnvLight), _Rim3EnableLighting), ra * (1.0 - _Rim3Emission), _Rim3BlendMode);
         rimEmis += rb * (ra * _Rim3Emission * LumiRimBlink(_Rim3EmissionStrength, _Rim3Blink));
     }
 #endif
@@ -1107,9 +1117,17 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
             hsv.y = max(hsv.y, 0.6);   // a white rim still cycles visibly
             baseC = LumiHSV2RGB(hsv);
         }
-        // lit rim: follows the light, the ambient and the shadows
+        // lit rim: lit by what reaches its side (lights + ambient SH / Light Volumes along the normal), split into
+        // brightness (strongest channel) and hue, so the rim keeps its own brightness when only the colour is taken over
         float3 rc = baseC * _OffsetRimStrength * lerp(1, s.albedo, _OffsetRimAlbedo);
-        rc *= lerp(1, c.litLight, _OffsetRimLightInfluence) * lerp(1, LumiLimitLight(shAvg) * 2.0, _OffsetRimEnvInfluence);
+        float3 rl = LumiRimEnvLight(gi, c, mainColor, s.N, 1.0);
+        float peak = max(rl.r, max(rl.g, rl.b));
+        // the hue comes from the light before the body's colour reduction (dark worlds wash the ambient out for the
+        // shading, a rim should still pick up the world's colour); near black it fades to white instead of noise
+        float3 raw = mainLight.color * saturate(dot(s.N, c.toonDir) * 0.5 + 0.5) + LumiGIIrradianceRaw(gi, s.N);
+        float rawPeak = max(raw.r, max(raw.g, raw.b));
+        float3 hue = lerp(1.0, raw / max(rawPeak, 1e-4), saturate(rawPeak * 20.0));
+        rc *= lerp(1, peak, _OffsetRimLightInfluence) * lerp(1, hue, _OffsetRimEnvInfluence);
         col += rc * (r * lerp(1, lit, _OffsetRimShadowMask) * _OffsetRimColor.a * (1.0 - _OffsetRimEmission));
         // emissive rim: glows the same in any world (added after world adaptation, like emission)
         float blink = sin(_Time.y * _OffsetRimBlink.y + _OffsetRimBlink.z) * 0.5 + 0.5;

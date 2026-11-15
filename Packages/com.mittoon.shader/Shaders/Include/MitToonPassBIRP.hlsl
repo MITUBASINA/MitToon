@@ -420,6 +420,8 @@ struct v2fOutline
     float4 screenPos: TEXCOORD3;
     LUMI_FOG_COORDS(4)
     float3 light    : TEXCOORD5;   // outline lighting, per vertex
+    float3 lightDir : TEXCOORD6;   // main light + ambient direction (highlight)
+    UNITY_SHADOW_COORDS(7)
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
 };
@@ -461,6 +463,7 @@ v2fOutline LumiOutlineVertex(appdata v, float widthCm, float zBiasCm)
     float camDist = distance(posWS, LumiGetCameraPositionWS());
     width *= lerp(1, min(camDist, _OutlineFixDistance), _OutlineFixWidth);   // keep screen width when far away
     width *= lerp(1, clamp(1.7320508 / max(LumiProjScaleY(), 1e-3), 0.5, 2.0), _OutlineFOVCompensate);   // same look at any FOV
+    float3 basePosWS = posWS;
     posWS += nWS * width;
     float3 toCam = normalize(LumiGetCameraPositionWS() - posWS);
     posWS -= toCam * zBiasCm * 0.01;
@@ -481,7 +484,13 @@ v2fOutline LumiOutlineVertex(appdata v, float widthCm, float zBiasCm)
         float3 mc = LumiKeepChroma(ml.color, gi.lightChromaKeep);
         float3 dir = ml.direction * LumiLuminance(mc) + gi.dirHint + float3(0, 0.001, 0);
         o.light = LumiLimitLight(mc + gi.autoKey + LumiGIIrradiance(gi, normalize(dir) * _SHSoftness));
+        o.lightDir = dir;
     }
+    UNITY_TRANSFER_SHADOW(o, v.uv1);
+#if defined(SHADOWS_SCREEN) && !defined(UNITY_NO_SCREENSPACE_SHADOWS)
+    // the outline lies outside the body, where the screen space shadow belongs to the background: read it on the body edge
+    o._ShadowCoord = ComputeScreenPos(LumiPerspectiveRemoval(UnityWorldToClipPos(basePosWS - nWS * 0.002)));
+#endif
     return o;
 }
 v2fOutline vertOutline(appdata v)  { return LumiOutlineVertex(v, _OutlineWidth, _OutlineZBias); }
@@ -489,7 +498,7 @@ v2fOutline vertOutline(appdata v)  { return LumiOutlineVertex(v, _OutlineWidth, 
 // "only outside the body" hides it with the stencil: the 1st outline's Z bias would only push it behind nearby objects (gaps), so only its own applies
 v2fOutline vertOutline2(appdata v) { return LumiOutlineVertex(v, _Outline2Width > 0 ? _OutlineWidth + _Outline2Width : 0, _OutlineZBias * (1.0 - _Outline2Silhouette) + _Outline2ZBias); }
 
-float4 LumiOutlineColor(v2fOutline i, float4 color, float mainBlend, float lighting)
+float4 LumiOutlineColor(v2fOutline i, float4 color, float mainBlend, float lighting, bool highlight)
 {
     float2 uv = i.uv0 * _MainTex_ST.xy + _MainTex_ST.zw;
     float4 main = LUMI_SAMPLE(_MainTex, uv) * _Color;
@@ -500,6 +509,18 @@ float4 LumiOutlineColor(v2fOutline i, float4 color, float mainBlend, float light
 #endif
     float4 col = color;
     col.rgb = lerp(col.rgb, col.rgb * main.rgb, mainBlend);
+
+    // highlight on the lit side (lilToon outline "Lit"): light and normal compared on the screen plane
+    if (highlight && _OutlineLitColor.a > 0)
+    {
+        float2 n2 = LumiWorldToViewDir(i.normalWS).xy;
+        float2 l2 = LumiWorldToViewDir(i.lightDir).xy;
+        float ndl = dot(n2 * rsqrt(max(dot(n2, n2), 1e-8)), l2 * rsqrt(max(dot(l2, l2), 1e-8))) * 0.5 + 0.5;
+        float f = saturate(ndl * _OutlineLitScale + _OutlineLitOffset) * _OutlineLitColor.a;
+        if (_OutlineLitShadowReceive > 0.5) { UNITY_LIGHT_ATTENUATION(atten, i, i.posWS); f *= atten; }
+        float3 litCol = _OutlineLitApplyTex > 0.5 ? main.rgb * _OutlineLitColor.rgb : _OutlineLitColor.rgb;
+        col.rgb = lerp(col.rgb, litCol, f);
+    }
 
     col.rgb *= lerp(1, i.light, lighting);
 
@@ -513,13 +534,13 @@ float4 fragOutline(v2fOutline i) : SV_Target
     UNITY_SETUP_INSTANCE_ID(i);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
     float2 uv = i.uv0 * _MainTex_ST.xy + _MainTex_ST.zw;
-    return LumiOutlineColor(i, _OutlineColor * LUMI_SAMPLE(_OutlineTex, uv), _OutlineMainBlend, _OutlineEnableLighting);
+    return LumiOutlineColor(i, _OutlineColor * LUMI_SAMPLE(_OutlineTex, uv), _OutlineMainBlend, _OutlineEnableLighting, true);
 }
 float4 fragOutline2(v2fOutline i) : SV_Target
 {
     UNITY_SETUP_INSTANCE_ID(i);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
-    return LumiOutlineColor(i, _Outline2Color, _Outline2MainBlend, _Outline2EnableLighting);
+    return LumiOutlineColor(i, _Outline2Color, _Outline2MainBlend, _Outline2EnableLighting, false);
 }
 
 // ---------------------------------------------------------------------------
