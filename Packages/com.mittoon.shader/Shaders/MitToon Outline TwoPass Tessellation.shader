@@ -724,6 +724,14 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
         _Outline2MainBlend ("2nd メインカラーの乗算|2nd Multiply Main Color", Range(0, 1)) = 0
         _Outline2EnableLighting ("2nd ライトの色を反映|2nd Apply Lighting", Range(0, 1)) = 1
         _Outline2ZBias ("2nd Z オフセット (cm)|2nd Z Bias (cm)", Range(-40, 40)) = 0
+        [ToggleUI] _Outline2Silhouette ("体の外側だけに描く (ステンシル)|Only Outside the Body (stencil)", Float) = 0
+        [HideInInspector] _Outline2StencilRef ("2nd Stencil Ref", Float) = 0
+        [HideInInspector] _Outline2StencilReadMask ("2nd Stencil ReadMask", Float) = 255
+        [HideInInspector] _Outline2StencilWriteMask ("2nd Stencil WriteMask", Float) = 255
+        [HideInInspector] _Outline2StencilComp ("2nd Stencil Comp", Float) = 8
+        [HideInInspector] _Outline2StencilPass ("2nd Stencil Pass", Float) = 0
+        [HideInInspector] _Outline2StencilFail ("2nd Stencil Fail", Float) = 0
+        [HideInInspector] _Outline2StencilZFail ("2nd Stencil ZFail", Float) = 0
 
         // ---------- v1.3: richness (avoid a flat matte look) ----------
         _RichShadowSaturation ("影の彩度アップ|Shadow Saturation", Range(0, 1)) = 0.35
@@ -824,36 +832,6 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             Pass [_StencilPass]
             Fail [_StencilFail]
             ZFail [_StencilZFail]
-        }
-
-        Pass
-        {
-            Name "OUTLINE2"
-            Tags { "LightMode" = "ForwardBase" }
-            Cull Front
-            ZWrite [_ZWrite]
-            ZTest [_ZTest]
-            Blend [_SrcBlend] [_DstBlend], One OneMinusSrcAlpha
-            Offset [_OffsetFactor], [_OffsetUnits]
-
-            CGPROGRAM
-            #pragma target 5.0
-            #pragma vertex tessVert
-            #pragma hull tessHull
-            #pragma domain tessDom_vertOutline2
-            #pragma fragment fragOutline2
-            #pragma multi_compile_fwdbase nolightmap nodynlightmap nodirlightmap noshadow
-            #pragma multi_compile_domain _ FOG_LINEAR FOG_EXP FOG_EXP2
-            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED
-            #pragma multi_compile_instancing
-            #pragma shader_feature_local _ _ALPHATEST_ON _ALPHABLEND_ON _ALPHAPREMULTIPLY_ON
-            #pragma shader_feature_local _LUMI_TONEMAP
-            #pragma shader_feature_local _LUMI_LIGHTVOLUMES
-            #pragma shader_feature_local _LUMI_INKLINE
-            #pragma shader_feature_local _LUMI_FPSMODE
-            #include "Include/MitToonPassBIRP.hlsl"
-            #include "Include/MitToonTessellation.hlsl"
-            ENDCG
         }
 
         Pass
@@ -1096,6 +1074,48 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma shader_feature_local _LUMI_TONEMAP
             #pragma shader_feature_local _LUMI_SPHERENORMAL
             #pragma shader_feature_local _LUMI_GRADIENT
+            #pragma shader_feature_local _LUMI_FPSMODE
+            #include "Include/MitToonPassBIRP.hlsl"
+            #include "Include/MitToonTessellation.hlsl"
+            ENDCG
+        }
+
+        // drawn after the body so the stencil marks of this material are already there
+        Pass
+        {
+            Name "OUTLINE2"
+            Tags { "LightMode" = "ForwardBase" }
+            // 2nd outline stencil: separate from the material stencil so "only outside the body" can skip pixels the avatar marked
+            Stencil
+            {
+                Ref [_Outline2StencilRef]
+                ReadMask [_Outline2StencilReadMask]
+                WriteMask [_Outline2StencilWriteMask]
+                Comp [_Outline2StencilComp]
+                Pass [_Outline2StencilPass]
+                Fail [_Outline2StencilFail]
+                ZFail [_Outline2StencilZFail]
+            }
+            Cull Front
+            ZWrite [_ZWrite]
+            ZTest [_ZTest]
+            Blend [_SrcBlend] [_DstBlend], One OneMinusSrcAlpha
+            Offset [_OffsetFactor], [_OffsetUnits]
+
+            CGPROGRAM
+            #pragma target 5.0
+            #pragma vertex tessVert
+            #pragma hull tessHull
+            #pragma domain tessDom_vertOutline2
+            #pragma fragment fragOutline2
+            #pragma multi_compile_fwdbase nolightmap nodynlightmap nodirlightmap noshadow
+            #pragma multi_compile_domain _ FOG_LINEAR FOG_EXP FOG_EXP2
+            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED
+            #pragma multi_compile_instancing
+            #pragma shader_feature_local _ _ALPHATEST_ON _ALPHABLEND_ON _ALPHAPREMULTIPLY_ON
+            #pragma shader_feature_local _LUMI_TONEMAP
+            #pragma shader_feature_local _LUMI_LIGHTVOLUMES
+            #pragma shader_feature_local _LUMI_INKLINE
             #pragma shader_feature_local _LUMI_FPSMODE
             #include "Include/MitToonPassBIRP.hlsl"
             #include "Include/MitToonTessellation.hlsl"

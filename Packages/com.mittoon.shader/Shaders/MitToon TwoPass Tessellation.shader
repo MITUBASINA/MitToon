@@ -724,6 +724,14 @@ Shader "MitToon/MitToon TwoPass Tessellation"
         _Outline2MainBlend ("2nd メインカラーの乗算|2nd Multiply Main Color", Range(0, 1)) = 0
         _Outline2EnableLighting ("2nd ライトの色を反映|2nd Apply Lighting", Range(0, 1)) = 1
         _Outline2ZBias ("2nd Z オフセット (cm)|2nd Z Bias (cm)", Range(-40, 40)) = 0
+        [ToggleUI] _Outline2Silhouette ("体の外側だけに描く (ステンシル)|Only Outside the Body (stencil)", Float) = 0
+        [HideInInspector] _Outline2StencilRef ("2nd Stencil Ref", Float) = 0
+        [HideInInspector] _Outline2StencilReadMask ("2nd Stencil ReadMask", Float) = 255
+        [HideInInspector] _Outline2StencilWriteMask ("2nd Stencil WriteMask", Float) = 255
+        [HideInInspector] _Outline2StencilComp ("2nd Stencil Comp", Float) = 8
+        [HideInInspector] _Outline2StencilPass ("2nd Stencil Pass", Float) = 0
+        [HideInInspector] _Outline2StencilFail ("2nd Stencil Fail", Float) = 0
+        [HideInInspector] _Outline2StencilZFail ("2nd Stencil ZFail", Float) = 0
 
         // ---------- v1.3: richness (avoid a flat matte look) ----------
         _RichShadowSaturation ("影の彩度アップ|Shadow Saturation", Range(0, 1)) = 0.35

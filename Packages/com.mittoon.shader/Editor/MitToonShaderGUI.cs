@@ -1812,7 +1812,16 @@ namespace MitToon.Editor
                 EndModule();
             }
             Sub("二重アウトライン (外側)", "Double Outline (outer)");
-            Props("_Outline2Width", "_Outline2Color", "_Outline2MainBlend", "_Outline2EnableLighting", "_Outline2ZBias");
+            Props("_Outline2Width", "_Outline2Color", "_Outline2MainBlend", "_Outline2EnableLighting", "_Outline2ZBias", "_Outline2Silhouette");
+            var sp = P("_Outline2Silhouette");
+            if (!collecting && !Searching && sp != null && !sp.hasMixedValue && sp.floatValue > 0.5f)
+            {
+                if (!Outline2StencilUsable(mat))
+                    Info("ステンシルを別の用途 (フェイクシャドウなど) で使っているため、このマテリアルでは使えません。", "The stencil is used for something else (fake shadow etc.), so this material cannot use it.", MessageType.Warning);
+                else
+                    Info("体の上には描かず、アバターの外側だけに線を出します。アバターのすべての MitToon マテリアル (2nd アウトラインを使わないものも) で有効にしてください。Z オフセットは数 cm で足ります。",
+                         "Draws the line only outside the avatar, never over the body. Turn this on for every MitToon material of the avatar (also the ones without a 2nd outline). A Z bias of a few cm is enough.", MessageType.None);
+            }
             if (!collecting && !Searching && GUILayout.Button(T("このマテリアルのメッシュにスムーズ法線をベイク (頂点カラー)", "Bake smoothed normals to vertex colors (meshes using this material)")))
                 MitToonOutlineBaker.BakeForMaterials(me.targets.Cast<Material>().ToArray());
             EndModule();
@@ -1881,6 +1890,40 @@ namespace MitToon.Editor
             SyncKeywords(material);
         }
 
+        // 2nd outline "only outside the body": every avatar material marks its pixels with one stencil bit, the 2nd outline skips marked pixels.
+        // The material stencil is only taken over while it is unused (default) or already ours.
+        const int SilhouetteBit = 128;
+        static readonly string[] StencilNames = { "Ref", "ReadMask", "WriteMask", "Comp", "Pass", "Fail", "ZFail" };
+        static float[] MainStencil(Material m) => StencilNames.Select(n => m.GetFloat("_Stencil" + n)).ToArray();
+        static bool StencilIsDefault(float[] s) => s[3] == (float)CompareFunction.Always && s[4] == 0 && s[5] == 0 && s[6] == 0;
+        static readonly float[] SilhouetteMain = { SilhouetteBit, 255, SilhouetteBit, (float)CompareFunction.Always, (float)StencilOp.Replace, 0, 0 };
+        static readonly float[] SilhouetteOutline = { SilhouetteBit, SilhouetteBit, 0, (float)CompareFunction.NotEqual, 0, 0, 0 };
+        static readonly float[] DefaultMain = { 0, 255, 255, (float)CompareFunction.Always, 0, 0, 0 };
+        static bool StencilIsSilhouette(float[] s) => s.SequenceEqual(SilhouetteMain);
+
+        internal static bool Outline2StencilUsable(Material m)
+        {
+            if (!m.HasProperty("_StencilComp")) return false;
+            var s = MainStencil(m);
+            return StencilIsDefault(s) || StencilIsSilhouette(s);
+        }
+
+        static void SyncOutline2Stencil(Material m)
+        {
+            if (!m.HasProperty("_Outline2Silhouette") || !m.HasProperty("_StencilComp")) return;
+            bool on = m.GetFloat("_Outline2Silhouette") > 0.5f;
+            var main = MainStencil(m);
+            if (on && Outline2StencilUsable(m)) main = SilhouetteMain;
+            else if (!on && StencilIsSilhouette(main)) main = DefaultMain;
+            bool sil = StencilIsSilhouette(main);
+            for (int i = 0; i < StencilNames.Length; i++)
+            {
+                SetIfDiffers(m, "_Stencil" + StencilNames[i], main[i]);
+                SetIfDiffers(m, "_Outline2Stencil" + StencilNames[i], sil ? SilhouetteOutline[i] : main[i]);
+            }
+        }
+        static void SetIfDiffers(Material m, string p, float v) { if (m.HasProperty(p) && m.GetFloat(p) != v) m.SetFloat(p, v); }
+
         public static void SyncKeywords(Material m)
         {
             foreach (var (prop, kw) in KeywordMap)
@@ -1896,6 +1939,7 @@ namespace MitToon.Editor
                 if (On("_UseRim") || On("_UseRim2") || On("_UseRim3")) m.EnableKeyword("_LUMI_RIM"); else m.DisableKeyword("_LUMI_RIM");
             }
             m.DisableKeyword("_LUMI_RIMSHADE");   // removed feature, cleared from old materials
+            SyncOutline2Stencil(m);
             // emission 1-4 are separate modules sharing one keyword; each has its own AudioLink
             bool On(string p) => m.HasProperty(p) && m.GetFloat(p) > 0.5f;
             if (m.HasProperty("_UseEmission"))
