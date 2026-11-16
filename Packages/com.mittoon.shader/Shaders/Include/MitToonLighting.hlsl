@@ -70,7 +70,7 @@ float3 LumiDiffuseNormal(LumiSurface s, LumiInputData d)
 // eye shadow guard: 1 where the eye must stay free of shadows
 float LumiEyeGuard(float2 uv)
 {
-    return LUMI_SAMPLE(_EyeGuardMask, uv).r * step(0.5, _UseEyeGuard);
+    return LUMI_SAMPLE(_EyeGuardMask, LUMI_TF(_EyeGuardMask, uv)).r * step(0.5, _UseEyeGuard);
 }
 
 // ---- Toon ramp ------------------------------------------------------------
@@ -244,7 +244,7 @@ float3 LumiCoatNormal(LumiSurface s, float2 uv)
 }
 float LumiCoatRoughness(float2 uv)
 {
-    return clamp(1.0 - _ClearCoatSmoothness * LUMI_SAMPLE(_ClearCoatSmoothnessMap, uv).r, 0.03, 1);
+    return clamp(1.0 - _ClearCoatSmoothness * LUMI_SAMPLE(_ClearCoatSmoothnessMap, LUMI_TF(_ClearCoatSmoothnessMap, uv)).r, 0.03, 1);
 }
 #endif
 
@@ -271,7 +271,7 @@ float3 LumiDirectSpecular(LumiSurface s, LumiCtx c, float3 L, float3 lightColor,
 
 #if defined(_LUMI_ANISO)
     {
-        float mask = LUMI_SAMPLE(_AnisoMask, uv).r;
+        float mask = LUMI_SAMPLE(_AnisoMask, LUMI_TF(_AnisoMask, uv)).r;
         float3 Th = LumiAnisoDirection(s.T, s.B, uv);
         float3 hairSpec;
         if (_AnisoMode < 0.5)
@@ -307,7 +307,7 @@ float3 LumiDirectSpecular(LumiSurface s, LumiCtx c, float3 L, float3 lightColor,
 
 #if defined(_LUMI_SHEEN)
     {
-        float3 sheen = _SheenColor.rgb * LUMI_SAMPLE(_SheenMap, uv).rgb * LUMI_SAMPLE(_SheenMask, uv).r;
+        float3 sheen = _SheenColor.rgb * LUMI_SAMPLE(_SheenMap, LUMI_TF(_SheenMap, uv)).rgb * LUMI_SAMPLE(_SheenMask, LUMI_TF(_SheenMask, uv)).r;
         spec += sheen * LumiD_Sheen(NoH, max(_SheenRoughness, 0.05)) * LumiV_Sheen(c.NoV, NoL) * (LUMI_PI * NoL);
         // velvet edge: fuzz that glows toward the silhouette on the lit side
         spec += sheen * _SheenFuzz * pow(saturate(1.0 - c.NoV), _SheenFuzzPower) * saturate(dot(s.N, L) * 0.5 + 0.5);
@@ -316,7 +316,7 @@ float3 LumiDirectSpecular(LumiSurface s, LumiCtx c, float3 L, float3 lightColor,
 
 #if defined(_LUMI_CLEARCOAT)
     {
-        float coat = _ClearCoat * LUMI_SAMPLE(_ClearCoatMask, uv).r;
+        float coat = _ClearCoat * LUMI_SAMPLE(_ClearCoatMask, LUMI_TF(_ClearCoatMask, uv)).r;
         float3 Nc = LumiCoatNormal(s, uv);
         float NoLc = saturate(dot(Nc, L));
         float NoHc = saturate(dot(Nc, H));
@@ -355,7 +355,7 @@ float3 LumiTransmission(LumiSurface s, LumiCtx c, float3 L, float3 lightColor, f
         float viewF = lerp(1, saturate(dot(-L, c.V)), _BacklightViewStrength);
         float dirF = pow(saturate(-dot(Nb, L) * 0.5 + 0.5), max(_BacklightDirectivity, 0.01));
         float b = LumiSmoothBorder(rim, _BacklightBorder, _BacklightBlur) * dirF * viewF;
-        float4 m = LUMI_SAMPLE(_BacklightMask, uv);
+        float4 m = LUMI_SAMPLE(_BacklightMask, LUMI_TF(_BacklightMask, uv));
         o += _BacklightColor.rgb * m.rgb * lerp(1, s.albedo, _BacklightMainStrength) * lightColor * (b * _BacklightColor.a);
     }
 #endif
@@ -407,8 +407,8 @@ float3 LumiCompatShading(LumiSurface s, LumiInputData d, float3 L, float3 origL,
     lns.z = saturate(dot(L, N3) * 0.5 + 0.5);
     float cs = saturate(atten + distance(L, origL));
     lns.xyz *= lerp(1.0.xxx, cs.xxx, float3(_ShadowReceive, _Shadow2ndReceive, _Shadow3rdReceive));
-    float4 blurM = LUMI_SAMPLE(_ShadowBlurMask, uv);
-    float4 bm = LUMI_SAMPLE(_ShadowBorderMask, uv);
+    float4 blurM = LUMI_SAMPLE(_ShadowBlurMask, LUMI_TF(_ShadowBlurMask, uv));
+    float4 bm = LUMI_SAMPLE(_ShadowBorderMask, LUMI_TF(_ShadowBorderMask, uv));
     bm.r = saturate(bm.r * _CompatAOShift.x + _CompatAOShift.y);
     bm.g = saturate(bm.g * _CompatAOShift.z + _CompatAOShift.w);
     bm.b = saturate(bm.b * _ShadowAOShift2.x + _ShadowAOShift2.y);
@@ -422,8 +422,8 @@ float3 LumiCompatShading(LumiSurface s, LumiInputData d, float3 L, float3 origL,
     lns = saturate(post ? lns * bm.rgbr : lns);
     lns *= d.facing < 0 ? 1.0 - _BackfaceForceShadow : 1.0;
     float mix = lns.x;
-    lns.x = lerp(1.0, lns.x, _ShadowStrength * LUMI_SAMPLE(_ShadowMaskTex, uv).r);
-    float4 t1 = LUMI_SAMPLE(_ShadowColorTex, uv), t2 = LUMI_SAMPLE(_Shadow2ndColorTex, uv), t3 = LUMI_SAMPLE(_Shadow3rdColorTex, uv);
+    lns.x = lerp(1.0, lns.x, _ShadowStrength * LUMI_SAMPLE(_ShadowMaskTex, LUMI_TF(_ShadowMaskTex, uv)).r);
+    float4 t1 = LUMI_SAMPLE(_ShadowColorTex, LUMI_TF(_ShadowColorTex, uv)), t2 = LUMI_SAMPLE(_Shadow2ndColorTex, LUMI_TF(_Shadow2ndColorTex, uv)), t3 = LUMI_SAMPLE(_Shadow3rdColorTex, LUMI_TF(_Shadow3rdColorTex, uv));
     float3 ind = lerp(albedo, t1.rgb, t1.a) * _ShadowColor.rgb;
     ind = lerp(ind, lerp(albedo, t2.rgb, t2.a) * _Shadow2ndColor.rgb, _Shadow2ndColor.a - lns.y * _Shadow2ndColor.a);
     ind = lerp(ind, lerp(albedo, t3.rgb, t3.a) * _Shadow3rdColor.rgb, _Shadow3rdColor.a - lns.z * _Shadow3rdColor.a);
@@ -479,7 +479,7 @@ float3 LumiCompatRim(float3 col, LumiSurface s, LumiInputData d, float3 V, float
     return LumiCompatBlend(col, ic.rgb * lm, rInd * ic.a, m);
 }
 
-float3 LumiCompatMatCap(float3 col, LumiSurface s, LumiInputData d, float3 N, float3 V, Texture2D tex, float4 st, Texture2D mask, float4 color, float mode, float lod,
+float3 LumiCompatMatCap(float3 col, LumiSurface s, LumiInputData d, float3 N, float3 V, Texture2D tex, float4 st, Texture2D mask, float4 maskST, float4 color, float mode, float lod,
                      float el, float shMask, float ms, float bfMask, float3 lc, float mix)
 {
     float2 muv = LumiCompatMatCapUV(normalize(N), V, st, _MatCapZRotCancel, _MatCapPerspective);
@@ -487,7 +487,7 @@ float3 LumiCompatMatCap(float3 col, LumiSurface s, LumiInputData d, float3 N, fl
     mc.rgb = lumiCompatFA > 0.5 ? (mode < 2.5 ? mc.rgb * lc * el : mc.rgb) : lerp(mc.rgb, mc.rgb * lc, el);
     mc.a = lerp(mc.a, mc.a * mix, shMask);
     mc.a = (d.facing < 0 && bfMask > 0.5) ? 0 : mc.a;
-    float3 mk = LUMI_SAMPLE(mask, s.uvMain).rgb;
+    float3 mk = LUMI_SAMPLE(mask, (s.uvMain) * maskST.xy + maskST.zw).rgb;
     mc.rgb = lerp(mc.rgb, mc.rgb * s.albedo, ms);
     return LumiCompatBlend(col, mc.rgb, mc.a * mk, mode);
 }
@@ -500,13 +500,13 @@ float3 LumiCompatEffects(float3 col, LumiSurface s, LumiInputData d, float3 V, f
     {
         float3 N = lerp(s.Ng, s.N, _RimShadeNormalStrength);
         float r = pow(saturate(1.0 - abs(dot(N, V))), _RimShadeFresnelPower);
-        r = saturate(LumiCompatToon(r, _RimShadeBorder, _RimShadeBlur, 0)) * _RimShadeColor.a * LUMI_SAMPLE(_RimShadeMask, uv).r;
+        r = saturate(LumiCompatToon(r, _RimShadeBorder, _RimShadeBlur, 0)) * _RimShadeColor.a * LUMI_SAMPLE(_RimShadeMask, LUMI_TF(_RimShadeMask, uv)).r;
         col = lerp(col, col * _RimShadeColor.rgb, r);
     }
     if (_UseBacklight > 0.5 && lumiCompatFA < 0.5)
     {
         float3 N = lerp(s.Ng, s.N, _BacklightNormalStrength);
-        float4 bc = _BacklightColor * LUMI_SAMPLE(_BacklightMask, uv);
+        float4 bc = _BacklightColor * LUMI_SAMPLE(_BacklightMask, LUMI_TF(_BacklightMask, uv));
         float f = pow(saturate(-dot(V, L) * 0.5 + 0.5), _BacklightDirectivity);
         float ln = dot(normalize(-V * _BacklightViewStrength + L), N) * 0.5 + 0.5;
         if (_BacklightReceiveShadow > 0.5) ln *= saturate(atten + distance(L, origL));
@@ -521,24 +521,24 @@ float3 LumiCompatEffects(float3 col, LumiSurface s, LumiInputData d, float3 V, f
         float3 N = lerp(s.Ng, s.N, _MatCapNormalStrength);
         if (_UseMatCapBump > 0.5)
         {
-            float3 nb = LumiUnpackNormal(LUMI_SAMPLE(_MatCapBumpMap, uv), _MatCapBumpScale);
+            float3 nb = LumiUnpackNormal(LUMI_SAMPLE(_MatCapBumpMap, LUMI_TF(_MatCapBumpMap, uv)), _MatCapBumpScale);
             N = normalize(s.T * nb.x + s.B * nb.y + s.Ng * nb.z);
         }
-        col = LumiCompatMatCap(col, s, d, N, V, _MatCapTex, _MatCapTex_ST, _MatCapMask, _MatCapColor, _MatCapBlend, _MatCapLod,
+        col = LumiCompatMatCap(col, s, d, N, V, _MatCapTex, _MatCapTex_ST, _MatCapMask, _MatCapMask_ST, _MatCapColor, _MatCapBlend, _MatCapLod,
                             _MatCapEnableLighting, _MatCapShadowMask, _MatCapMainStrength, _MatCapBackfaceMask, lc, mix);
     }
     if (_UseMatCap2 > 0.5)
-        col = LumiCompatMatCap(col, s, d, lerp(s.Ng, s.N, _MatCap2NormalStrength), V, _MatCap2Tex, _MatCap2Tex_ST, _MatCap2Mask, _MatCap2Color, _MatCap2Blend, _MatCap2Lod,
+        col = LumiCompatMatCap(col, s, d, lerp(s.Ng, s.N, _MatCap2NormalStrength), V, _MatCap2Tex, _MatCap2Tex_ST, _MatCap2Mask, _MatCap2Mask_ST, _MatCap2Color, _MatCap2Blend, _MatCap2Lod,
                             _MatCap2EnableLighting, _MatCap2ShadowMask, 0, 0, lc, mix);
     if (_UseRim > 0.5)
         col = LumiCompatRim(col, s, d, V, L, lc, mix, _RimNormalStrength, _RimFresnelPower, _RimBorder, _RimBlur, _RimBackfaceMask, _RimShadowMask,
-                         _RimMainStrength, _RimEnableLighting, _RimColor, LUMI_SAMPLE(_RimTex, uv), _RimBlendMode, _RimLightDir, 1);
+                         _RimMainStrength, _RimEnableLighting, _RimColor, LUMI_SAMPLE(_RimTex, LUMI_TF(_RimTex, uv)), _RimBlendMode, _RimLightDir, 1);
     if (_UseRim2 > 0.5)
         col = LumiCompatRim(col, s, d, V, L, lc, mix, _Rim2NormalStrength, _Rim2FresnelPower, _Rim2Border, _Rim2Blur, _Rim2BackfaceMask, _Rim2ShadowMask,
-                         _Rim2MainStrength, _Rim2EnableLighting, _Rim2Color, LUMI_SAMPLE(_Rim2Tex, uv), _Rim2BlendMode, _Rim2LightDir, 0);
+                         _Rim2MainStrength, _Rim2EnableLighting, _Rim2Color, LUMI_SAMPLE(_Rim2Tex, LUMI_TF(_Rim2Tex, uv)), _Rim2BlendMode, _Rim2LightDir, 0);
     if (_UseRim3 > 0.5)
         col = LumiCompatRim(col, s, d, V, L, lc, mix, _Rim3NormalStrength, _Rim3FresnelPower, _Rim3Border, _Rim3Blur, _Rim3BackfaceMask, _Rim3ShadowMask,
-                         _Rim3MainStrength, _Rim3EnableLighting, _Rim3Color, LUMI_SAMPLE(_Rim3Tex, uv), _Rim3BlendMode, _Rim3LightDir, 0);
+                         _Rim3MainStrength, _Rim3EnableLighting, _Rim3Color, LUMI_SAMPLE(_Rim3Tex, LUMI_TF(_Rim3Tex, uv)), _Rim3BlendMode, _Rim3LightDir, 0);
     return col;
 }
 #endif
@@ -610,13 +610,13 @@ float2 LumiMatCapUV(float3 N, float3 V, float3 posWS, float perspective, float z
     float3 y = cross(viewZ, x);
     return float2(dot(N, x), dot(N, y)) * 0.495 + 0.5;
 }
-float3 LumiApplyMatCap(float3 col, Texture2D tex, Texture2D mask, float4 color, float blend, float lod, float lighting, float shadowMask,
+float3 LumiApplyMatCap(float3 col, Texture2D tex, Texture2D mask, float4 maskST, float4 color, float blend, float lod, float lighting, float shadowMask,
                        float mainStr, float2 uvMain, float2 mcuv, float3 albedo, float3 light, float lit)
 {
     float4 m = tex.SampleLevel(sampler_trilinear_clamp, mcuv, lod) * color;
     m.rgb *= lerp(1, albedo, mainStr);
     m.rgb *= lerp(1, light, lighting);
-    float a = m.a * LUMI_SAMPLE(mask, uvMain).r * lerp(1, lit, shadowMask);
+    float a = m.a * LUMI_SAMPLE(mask, (uvMain) * maskST.xy + maskST.zw).r * lerp(1, lit, shadowMask);
     return LumiBlend(col, m.rgb, a, blend);
 }
 
@@ -641,7 +641,7 @@ float3 LumiGlitter(LumiSurface s, LumiInputData d, LumiCtx c, float3 H)
         float3 rc = lerp(1, LumiHSV2RGB(float3(rnd.z, 0.8, 1)), _GlitterRandomColor);
         acc += g * rc;
     }
-    float3 col = acc * _GlitterColor.rgb * _GlitterColor.a * LUMI_SAMPLE(_GlitterMask, s.uvMain).r;
+    float3 col = acc * _GlitterColor.rgb * _GlitterColor.a * LUMI_SAMPLE(_GlitterMask, LUMI_TF(_GlitterMask, s.uvMain)).r;
     col *= lerp(1, c.litLight, _GlitterEnableLighting);
     col *= lerp(1, c.rampLit, _GlitterShadowMask);
     return col;
@@ -752,7 +752,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
     c.depthValidity = LumiScreenSpaceValidity(d);
     float aoMask = 1;
 #if defined(_LUMI_SSAO)
-    aoMask = LUMI_SAMPLE(_SSAOMask, uv).r;
+    aoMask = LUMI_SAMPLE(_SSAOMask, LUMI_TF(_SSAOMask, uv)).r;
 #endif
     // normal map detail: sample around the bumped normal so small creases of the normal map also occlude
     float3 aoN = normalize(lerp(s.Ng, s.N, _SSAONormalStrength));
@@ -764,7 +764,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
     c.aoColor = lerp(occCol, 1, c.ssao);
     float csMask = 1;
 #if defined(_LUMI_CONTACTSHADOW)
-    csMask = LUMI_SAMPLE(_ContactShadowMask, uv).r;
+    csMask = LUMI_SAMPLE(_ContactShadowMask, LUMI_TF(_ContactShadowMask, uv)).r;
 #endif
     float contact = LumiContactShadow(d.posWS, s.Ng, c.toonDir, d.eyeDepth, d.pixelPos, c.depthValidity, csMask);
     float castSh = mainLight.shadowAttenuation;
@@ -809,7 +809,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         float sdf = _FaceSDFTex.Sample(sampler_linear_clamp, suv).r;
         float th = 1.0 - (dot(fwd, Lh) * 0.5 + 0.5);
         faceLit = LumiSmoothBorder(sdf, th, _FaceSDFBlur);
-        faceMask = LUMI_SAMPLE(_FaceSDFMask, uv).r;
+        faceMask = LUMI_SAMPLE(_FaceSDFMask, LUMI_TF(_FaceSDFMask, uv)).r;
         float xShade = max(_Shadow2ndBorder + _Shadow2ndBlur, _ShadowBorder - _ShadowBlur) + 0.01;
         float xFace0 = lerp(xShade, 1.0, faceLit);
         toonX = lerp(toonX, xFace0 * lerp(1, shadow, _ReceiveShadowStrength), faceMask);
@@ -936,7 +936,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
 #endif
 #if defined(_LUMI_CLEARCOAT)
     {
-        float coat = _ClearCoat * LUMI_SAMPLE(_ClearCoatMask, uv).r;
+        float coat = _ClearCoat * LUMI_SAMPLE(_ClearCoatMask, LUMI_TF(_ClearCoatMask, uv)).r;
         float3 Nc = LumiCoatNormal(s, uv);
         float pr = LumiCoatRoughness(uv);
         float NoVc = saturate(dot(Nc, c.V));
@@ -1029,16 +1029,16 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         float3 Nm = s.N;
         if (_UseMatCapBump > 0.5)
         {
-            float3 nb = LumiUnpackNormal(LUMI_SAMPLE(_MatCapBumpMap, uv), _MatCapBumpScale);
+            float3 nb = LumiUnpackNormal(LUMI_SAMPLE(_MatCapBumpMap, LUMI_TF(_MatCapBumpMap, uv)), _MatCapBumpScale);
             Nm = normalize(s.T * nb.x + s.B * nb.y + s.N * nb.z);
         }
         float3 N1 = normalize(lerp(s.Ng, Nm, _MatCapNormalStrength));
-        col = LumiApplyMatCap(col, _MatCapTex, _MatCapMask, _MatCapColor, _MatCapBlend, _MatCapLod, _MatCapEnableLighting, _MatCapShadowMask,
+        col = LumiApplyMatCap(col, _MatCapTex, _MatCapMask, _MatCapMask_ST, _MatCapColor, _MatCapBlend, _MatCapLod, _MatCapEnableLighting, _MatCapShadowMask,
                               _MatCapMainStrength, uv, LumiMatCapUV(N1, c.V, d.posWS, _MatCapPerspective, _MatCapZRotCancel), s.albedo, c.litLight, lit);
         if (_UseMatCap2 > 0.5)
         {
             float3 N2 = normalize(lerp(s.Ng, Nm, _MatCap2NormalStrength));
-            col = LumiApplyMatCap(col, _MatCap2Tex, _MatCap2Mask, _MatCap2Color, _MatCap2Blend, _MatCap2Lod, _MatCap2EnableLighting, _MatCap2ShadowMask,
+            col = LumiApplyMatCap(col, _MatCap2Tex, _MatCap2Mask, _MatCap2Mask_ST, _MatCap2Color, _MatCap2Blend, _MatCap2Lod, _MatCap2EnableLighting, _MatCap2ShadowMask,
                                   0, uv, LumiMatCapUV(N2, c.V, d.posWS, _MatCapPerspective, _MatCapZRotCancel), s.albedo, c.litLight, lit);
         }
     }
@@ -1055,7 +1055,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         if (_RimMode > 0.5 && c.depthValidity > 0.5)
             r = LumiDepthRim(Nr, d.screenUV, d.eyeDepth, _RimDepthWidth, _RimDepthThreshold) * lerp(1, r, 0.25);
         r = LumiRimLightMask(r, Nr, c.toonDir, _RimLightDir, _RimShadowMask, _RimBackfaceMask, _RimLitSideOnly, _RimLitSideBlur, lit, d.facing);
-        float4 rt = LUMI_SAMPLE(_RimTex, uv);
+        float4 rt = LUMI_SAMPLE(_RimTex, LUMI_TF(_RimTex, uv));
         float3 rb = LumiRimHue(_RimColor.rgb, _RimHueSpeed) * rt.rgb * lerp(1, s.albedo, _RimMainStrength);
         float ra = saturate(r) * _RimColor.a * rt.a;
         col = LumiRimBlend(col, rb * lerp(1, LumiRimEnvLight(gi, c, mainColor, Nr, _RimEnvLight), _RimEnableLighting), ra * (1.0 - _RimEmission), _RimBlendMode);
@@ -1066,7 +1066,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         float3 Nr = normalize(lerp(s.Ng, s.N, _Rim2NormalStrength));
         float r = LumiSmoothBorder(pow(saturate(1.0 - dot(Nr, c.V)), _Rim2FresnelPower), _Rim2Border, _Rim2Blur);
         r = LumiRimLightMask(r, Nr, c.toonDir, _Rim2LightDir, _Rim2ShadowMask, _Rim2BackfaceMask, _Rim2LitSideOnly, _Rim2LitSideBlur, lit, d.facing);
-        float4 rt = LUMI_SAMPLE(_Rim2Tex, uv);
+        float4 rt = LUMI_SAMPLE(_Rim2Tex, LUMI_TF(_Rim2Tex, uv));
         float3 rb = LumiRimHue(_Rim2Color.rgb, _Rim2HueSpeed) * rt.rgb * lerp(1, s.albedo, _Rim2MainStrength);
         float ra = saturate(r) * _Rim2Color.a * rt.a;
         col = LumiRimBlend(col, rb * lerp(1, LumiRimEnvLight(gi, c, mainColor, Nr, _Rim2EnvLight), _Rim2EnableLighting), ra * (1.0 - _Rim2Emission), _Rim2BlendMode);
@@ -1077,7 +1077,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         float3 Nr = normalize(lerp(s.Ng, s.N, _Rim3NormalStrength));
         float r = LumiSmoothBorder(pow(saturate(1.0 - dot(Nr, c.V)), _Rim3FresnelPower), _Rim3Border, _Rim3Blur);
         r = LumiRimLightMask(r, Nr, c.toonDir, _Rim3LightDir, _Rim3ShadowMask, _Rim3BackfaceMask, _Rim3LitSideOnly, _Rim3LitSideBlur, lit, d.facing);
-        float4 rt = LUMI_SAMPLE(_Rim3Tex, uv);
+        float4 rt = LUMI_SAMPLE(_Rim3Tex, LUMI_TF(_Rim3Tex, uv));
         float3 rb = LumiRimHue(_Rim3Color.rgb, _Rim3HueSpeed) * rt.rgb * lerp(1, s.albedo, _Rim3MainStrength);
         float ra = saturate(r) * _Rim3Color.a * rt.a;
         col = LumiRimBlend(col, rb * lerp(1, LumiRimEnvLight(gi, c, mainColor, Nr, _Rim3EnvLight), _Rim3EnableLighting), ra * (1.0 - _Rim3Emission), _Rim3BlendMode);

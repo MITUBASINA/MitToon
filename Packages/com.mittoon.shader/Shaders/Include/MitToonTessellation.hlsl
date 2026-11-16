@@ -57,7 +57,7 @@ LumiTessCP tessVert(LumiTessIn v)
     o.uv0 = v.uv0;
     o.uv1 = v.uv1;
     o.color = v.color;
-    o.mask.x = _TessMask.SampleLevel(sampler_trilinear_repeat, muv, 0).r;
+    o.mask.x = _TessMask.SampleLevel(sampler_trilinear_repeat, LUMI_TF(_TessMask, muv), 0).r;
     o.mask.y = baked * step(0.5, v.tessData.z);
 #if defined(LUMI_TESS_INSTANCING)
     o.instID = v.instanceID;

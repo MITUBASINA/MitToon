@@ -6,6 +6,16 @@ CBUFFER_START(UnityPerMaterial)
     // Main
     float4 _Color;
     float4 _MainTex_ST;
+    // tiling / offset of the masks and maps (applied on top of the UV they are read with)
+    float4 _MainColorAdjustMask_ST, _AlphaMask_ST, _Main2Mask_ST, _Main3Mask_ST, _BumpMap_ST, _BumpMask_ST;
+    float4 _Bump2Mask_ST, _DetailMask_ST, _DetailNormalMap_ST, _ParallaxMap_ST, _MaskMap_ST, _MetallicMap_ST;
+    float4 _SmoothnessMap_ST, _OcclusionMap_ST, _SpecularMask_ST, _WetnessMask_ST, _ShadowMaskTex_ST, _ILMMap_ST;
+    float4 _FaceSDFMask_ST, _ShadowColorTex_ST, _Shadow2ndColorTex_ST, _Shadow3rdColorTex_ST, _ShadowBorderMask_ST, _ShadowBlurMask_ST;
+    float4 _RimShadeMask_ST, _SSAOMask_ST, _ContactShadowMask_ST, _SSSMap_ST, _BacklightMask_ST, _AnisoMask_ST;
+    float4 _SheenMap_ST, _SheenMask_ST, _ClearCoatMask_ST, _ClearCoatSmoothnessMap_ST, _RimTex_ST, _Rim2Tex_ST;
+    float4 _Rim3Tex_ST, _MatCapMask_ST, _MatCapBumpMap_ST, _MatCap2Mask_ST, _GlitterMask_ST, _EmissionMask_ST;
+    float4 _Emission2Mask_ST, _Emission3Mask_ST, _Emission4Mask_ST, _BackfaceTex_ST, _WobbleMask_ST, _EyeGuardMask_ST;
+    float4 _EyeParallaxMask_ST, _TessMask_ST, _OutlineTex_ST, _OutlineWidthMask_ST;
     float4 _MainTexHSVG;
     float4 _MainScroll;
     float  _AlphaMaskMode;
@@ -252,6 +262,7 @@ SamplerState sampler_point_clamp;
 SamplerState sampler_trilinear_repeat;
 
 #define LUMI_SAMPLE(tex, uv)        tex.Sample(sampler_MainTex, uv)
+#define LUMI_TF(tex, uv)            ((uv) * tex##_ST.xy + tex##_ST.zw)
 #define LUMI_SAMPLE_LOD(tex, uv, l) tex.SampleLevel(sampler_MainTex, uv, l)
 #define LUMI_SAMPLE_CLAMP(tex, uv)  tex.Sample(sampler_linear_clamp, uv)
 

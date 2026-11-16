@@ -145,7 +145,7 @@ bool LumiHidden(appdata v)
 float3 LumiWobbleWS(float3 posWS, appdata v)
 {
     if (_WobbleStrength <= 0.0001) return 0;
-    float m = _WobbleMask.SampleLevel(sampler_trilinear_repeat, v.uv0, 0).r * lerp(1, v.color.r, _WobbleVertexColor);
+    float m = _WobbleMask.SampleLevel(sampler_trilinear_repeat, LUMI_TF(_WobbleMask, v.uv0), 0).r * lerp(1, v.color.r, _WobbleVertexColor);
     float3 dir = normalize(_WobbleDir.xyz + float3(1e-5, 0, 0));
     float3 p = posWS - unity_ObjectToWorld._m03_m13_m23;
     float t = _Time.y * _WobbleSpeed;
@@ -445,7 +445,7 @@ v2fOutline LumiOutlineVertex(appdata v, float widthCm, float zBiasCm)
     if (_OutlineWidthBaked > 0.5 && _OutlineNormalSource > 0.5) width *= v.color.a;
     else
     {
-        width *= _OutlineWidthMask.SampleLevel(sampler_trilinear_repeat, v.uv0, 0).r;
+        width *= _OutlineWidthMask.SampleLevel(sampler_trilinear_repeat, LUMI_TF(_OutlineWidthMask, v.uv0), 0).r;
         width *= lerp(1, v.color.a, _OutlineVertexColorWidth);
     }
     float3 posWS = LumiObjectToWorld(v.vertex.xyz);
@@ -534,7 +534,7 @@ float4 fragOutline(v2fOutline i) : SV_Target
     UNITY_SETUP_INSTANCE_ID(i);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
     float2 uv = i.uv0 * _MainTex_ST.xy + _MainTex_ST.zw;
-    return LumiOutlineColor(i, _OutlineColor * LUMI_SAMPLE(_OutlineTex, uv), _OutlineMainBlend, _OutlineEnableLighting, true);
+    return LumiOutlineColor(i, _OutlineColor * LUMI_SAMPLE(_OutlineTex, LUMI_TF(_OutlineTex, uv)), _OutlineMainBlend, _OutlineEnableLighting, true);
 }
 float4 fragOutline2(v2fOutline i) : SV_Target
 {
@@ -597,7 +597,7 @@ float4 fragShadow(v2fShadow i) : SV_Target
 #if defined(_ALPHATEST_ON) || defined(_ALPHABLEND_ON) || defined(_ALPHAPREMULTIPLY_ON) || defined(_LUMI_DISSOLVE)
     float2 uv = i.uv0 * _MainTex_ST.xy + _MainTex_ST.zw;
     float a = LUMI_SAMPLE(_MainTex, uv).a * _Color.a;
-    float am = LUMI_SAMPLE(_AlphaMask, uv).r;
+    float am = LUMI_SAMPLE(_AlphaMask, LUMI_TF(_AlphaMask, uv)).r;
     if (_AlphaMaskMode == 1) a = am; else if (_AlphaMaskMode == 2) a *= am;
     a = saturate(a + _AlphaMaskValue);
     #if defined(_ALPHATEST_ON)
