@@ -61,6 +61,12 @@ CBUFFER_START(UnityPerMaterial)
     float4 _LightDirOverride;
     float  _TessEdgeLength, _TessMax, _TessPhong, _TessFadeStart, _TessFadeEnd;
     float  _LightColorMode, _LightMapMode, _UnlitIntensity, _LightViewYaw, _LightViewPitch;
+    float  _URPShading, _URPMixDiffuse, _URPMixSpecular, _RTSkyLight;
+    float  _RTShadowStrength, _RTShadowLength, _RTShadowSoftness, _RTShadowRays, _RTShadowSteps, _RTShadowThickness, _RTShadowBias;
+    float  _RTAOStrength, _RTAORadius, _RTAORays, _RTAOSteps, _RTAOThickness, _RTGIStrength;
+    float  _RTGIRays, _RTGILength, _RTGISpecular, _RTGIMaxBright, _RTAOMultiBounce;
+    float  _RTAlphaDst, _Cull;
+    float  _RTReflStrength, _RTReflLength, _RTReflSteps, _RTReflThickness, _RTReflRoughCut, _RTMaxDistance;
     float  _AutoShadowColor, _AutoShadowHue, _AutoShadowDarkness, _QLodDistance;
     float  _AddLightSoftness, _AddLightCastShadow;
     float  _AddLightMaxLimit, _AddLightPassthrough, _AddLightMonochrome, _AddLightSmoothFalloff, _AddLightIgnoreDirectional, _LightDirKeepUp;
@@ -81,6 +87,7 @@ CBUFFER_START(UnityPerMaterial)
     float  _ShadowTerminatorFade;
     float  _ContactShadowLength, _ContactShadowThickness, _ContactShadowStrength, _ContactShadowSteps;
     float  _ContactShadowBias, _ContactShadowMinDelta, _ContactShadowSoftness, _ContactShadowEndFade, _ContactShadowJitter;
+    float  _NoiseBlur;
     float  _ContactShadowDistanceScale, _ContactShadowMaxDistance, _ContactShadowMaskStrength;
     // SSS / backlight
     float4 _SSSColor;
@@ -202,6 +209,12 @@ CBUFFER_START(UnityPerMaterial)
     float  _Outline2Width, _Outline2MainBlend, _Outline2EnableLighting, _Outline2ZBias, _Outline2Silhouette;
     float4 _Outline2Color;
     float  _RimEnvLight, _Rim2EnvLight, _Rim3EnvLight;
+    float  _UsePCSS, _PCSSLightSize, _PCSSMaxBlur, _PCSSSamples, _PCSSToon;
+    float  _PCSSWorldLight, _PCSSWorldShadowStrength, _PCSSWorldShadowLength, _PCSSWorldShadowSoftness;
+    float  _PCSSShadowStrength, _DstBlendAdd, _PCSSBorder;
+    float4 _PCSSShadowColor, _PCSSBorderColor, _PCSSReceiveMask_ST;
+    float  _PCSSBorderWidth, _PCSSShading, _PCSSNormalStrength, _PCSSDistanceFade, _PCSSShadowColorStrength, _PCSSAutoColor;
+    float  _PCSSShadingBlur, _PCSSMinBlur, _PCSSSearchScale, _PCSSReceiverBias, _PCSSShadingBorder, _PCSSJitter, _PCSSTexelFilter, _PCSSShadowKeep;
     float4 _OutlineLitColor;
     float  _OutlineLitApplyTex, _OutlineLitScale, _OutlineLitOffset, _OutlineLitShadowReceive;
     // v1.3: richness
@@ -225,10 +238,23 @@ CBUFFER_START(UnityPerMaterial)
     // Outline
     float  _OutlineWidth, _OutlineVertexColorWidth, _OutlineWidthBaked, _OutlineFixWidth, _OutlineZBias, _OutlineEnableLighting, _OutlineMainBlend;
     float4 _OutlineColor;
+    float  _AvatarScaleFollow;
+    // standalone AudioLink (its own glow, outline too)
+    float4 _ALColor, _ALMask_ST;
+    float  _UseALSolo, _ALBand, _ALWaveMode, _ALWaveLength, _ALStrength, _ALMin, _ALMainBlend, _ALOutline, _ALNoSignal;
 CBUFFER_END
 // set globally by the VRChat client (0 = normal view)
 float _VRChatMirrorMode;
 float _VRChatCameraMode;
+// the URP shading model: its code only in the variants that use it (a keyword; with a uniform branch alone every variant
+// compiled it, a quarter of the compile time of a typical material)
+#if defined(_LUMI_URPSHADING)
+    #define LUMI_URP_MODEL (_URPShading > 0.5)
+#else
+    #define LUMI_URP_MODEL false
+#endif
+// the avatar's scale at this pixel (see LumiVertexScale; set by LumiBuildInput): lengths in m / cm are multiplied by it
+static float lumiAvatarScale = 1.0;
 
 Texture2D _MainTex;            SamplerState sampler_MainTex;
 Texture2D _AlphaMask;
@@ -237,6 +263,7 @@ Texture2D _BumpMap, _Bump2Map, _Bump2Mask;
 Texture2D _DetailAlbedoMap, _DetailNormalMap, _DetailMask;
 Texture2D _ParallaxMap;
 Texture2D _MaskMap, _MetallicMap, _SmoothnessMap, _OcclusionMap;
+Texture2D _PCSSReceiveMask;
 Texture2D _ShadowColorTex, _Shadow2ndColorTex, _ShadowMaskTex, _ShadowRampTex, _Shadow3rdColorTex, _ShadowBorderMask, _ShadowBlurMask, _RimShadeMask, _MainColorAdjustMask;
 Texture2D _SSSMap, _BacklightMask;
 Texture2D _AnisoShiftMap, _AnisoMask;
@@ -253,6 +280,7 @@ Texture2D _SpecularMask, _WetnessMask, _ILMMap, _FaceSDFTex, _FaceSDFMask;
 Texture2D _TessMask;
 Texture2D _EyeGuardMask;
 Texture2D _EyeParallaxMask;
+Texture2D _ALMask;
 TextureCube _ReflCube;
 Texture2D _AudioTexture;       float4 _AudioTexture_TexelSize;
 

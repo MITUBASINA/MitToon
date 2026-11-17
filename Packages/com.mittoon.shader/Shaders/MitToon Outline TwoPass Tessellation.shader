@@ -149,6 +149,10 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
         _ShadowAOShift ("AO で影の境界を動かす|AO Shifts Border", Range(0, 1)) = 0.5
         // ---------- lilToon mode ----------
         [Toggle(_LUMI_COMPAT)] _CompatShading ("lilToon モード|lilToon Mode", Float) = 0
+        [ToggleUI] _URPShading ("URP ライティング (物理ベース)|URP Lighting (physically based)", Float) = 0
+        _RTSkyLight ("空の光を光線で影付け|Sky Light Shadowed by Rays", Range(0, 1)) = 1
+        _URPMixDiffuse ("URP の陰影を混ぜる (自然な立体感)|Mix URP Shading (natural volume)", Range(0, 1)) = 0
+        _URPMixSpecular ("URP のハイライトと映り込みを混ぜる|Mix URP Highlights and Reflections", Range(0, 1)) = 0
         _Shadow3rdColor ("3影の色|3rd Shadow Color", Color) = (0, 0, 0, 0)
         _Shadow3rdColorTex ("3影テクスチャ|3rd Shadow Texture", 2D) = "black" {}
         _Shadow3rdBorder ("3影の境界|3rd Border", Range(0, 1)) = 0.25
@@ -183,6 +187,34 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
         _ReceiveShadowStrength ("落ち影を受ける|Receive Shadows", Range(0, 1)) = 1
         [ToggleUI] _ReceiveCastShadow ("落ち影を受け取る (オフでも陰影や他の影は残る)|Receive Cast Shadows (off keeps shading and other shadows)", Float) = 1
         _CastShadowSoftness ("落ち影の縁のやわらかさ|Cast Shadow Edge Softness", Range(0, 1)) = 0.3
+        [ToggleUI] _UsePCSS ("高品質な影 (PCSS)|Soft Shadows (PCSS)", Float) = 0
+        _PCSSLightSize ("光源の大きさ (cm)|Light Size (cm)", Range(0, 50)) = 8
+        _PCSSMinBlur ("最小のぼけ幅 (cm, 接地部分も少しぼかす)|Min Blur (cm, softens contact too)", Range(0, 5)) = 0.3
+        _PCSSMaxBlur ("最大のぼけ幅 (cm)|Max Blur (cm)", Range(0.1, 30)) = 8
+        _PCSSSamples ("サンプル数 (多いほどなめらか、重い)|Samples (more = smoother, heavier)", Range(8, 64)) = 24
+        _PCSSSearchScale ("遮蔽物を探す範囲|Blocker Search Range", Range(0.5, 4)) = 1
+        _PCSSJitter ("ノイズの量 (0=模様が出る、1=細かいノイズ)|Noise (0 = patterns, 1 = fine noise)", Range(0, 1)) = 1
+        _PCSSTexelFilter ("影マップのなめらか補間|Smooth Shadow Map Lookup", Range(0, 1)) = 1
+        _PCSSReceiverBias ("受け側のバイアス (cm, 自己影のノイズ対策)|Receiver Bias (cm, against self shadow noise)", Range(0, 3)) = 0.2
+        _PCSSBorder ("落ち影の境界 (右ほど影が広がる)|Cast Shadow Border (right = larger shadow)", Range(0, 1)) = 0.5
+        _PCSSToon ("境界をくっきり (アニメ)|Sharpen Edge (anime)", Range(0, 1)) = 0
+        _PCSSShadowStrength ("影の濃さ|Shadow Darkness", Range(0, 1)) = 0.6
+        _PCSSShadowKeep ("影の中に残す明るさ (0で真っ黒)|Brightness Kept in Shadow (0 = black)", Range(0, 1)) = 0.3
+        _PCSSShadowColor ("影に足す色 (環境光の明るさに合わせる)|Shadow Fill Colour (scaled by ambient)", Color) = (0, 0, 0, 1)
+        _PCSSShadowColorStrength ("影に足す色の強さ|Fill Colour Strength", Range(0, 8)) = 2
+        _PCSSAutoColor ("ベースカラーから影の色を付ける|Shadow Colour from Base Colour", Range(0, 2)) = 0.5
+        [HDR] _PCSSBorderColor ("影の境界の色 (A=強さ)|Shadow Border Colour (A=strength)", Color) = (1, 0.35, 0.25, 0)
+        _PCSSBorderWidth ("境界の色の幅|Border Colour Width", Range(0.05, 1)) = 0.4
+        _PCSSShading ("陰影の濃さ (光の裏側を暗くする)|Shading Darkness (faces turned away)", Range(0, 1)) = 1
+        _PCSSShadingBorder ("陰影の境界 (右ほど影が広がる)|Shading Border (right = larger shadow)", Range(0, 1)) = 0.5
+        _PCSSShadingBlur ("陰影の境界のぼかし|Shading Border Blur", Range(0, 1)) = 0.5
+        _PCSSNormalStrength ("ノーマルマップの影響|Normal Map Influence", Range(0, 1)) = 1
+        _PCSSReceiveMask ("受け取りマスク (R, 黒=影なし)|Receive Mask (R, black = none)", 2D) = "white" {}
+        _PCSSDistanceFade ("遠くで薄く (m, 0=オフ)|Fade with Distance (m, 0 = off)", Range(0, 30)) = 0
+        [ToggleUI] _PCSSWorldLight ("影の向きをワールドの光から推測|Shadow Direction from the World's Light", Float) = 0
+        _PCSSWorldShadowStrength ("推測した光の落ち影の強さ|Shadow Strength (world's light)", Range(0, 1)) = 1
+        _PCSSWorldShadowLength ("推測した光の落ち影の長さ (m)|Shadow Length (world's light, m)", Range(0.05, 3)) = 0.8
+        _PCSSWorldShadowSoftness ("推測した光の落ち影のやわらかさ|Shadow Softness (world's light)", Range(0, 20)) = 4
 
         // ---------- Lighting ----------
         _LightMinLimit ("明るさ下限|Min Brightness", Range(0, 1)) = 0.05
@@ -264,6 +296,32 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
         _ContactShadowMaxDistance ("有効距離 (m, 0 = 無制限)|Max Distance (m, 0 = unlimited)", Range(0, 50)) = 0
         _ContactShadowMask ("受ける側のマスク (R, 黒 = 影なし)|Receive Mask (R, black = none)", 2D) = "white" {}
         _ContactShadowMaskStrength ("マスクの強さ|Mask Strength", Range(0, 1)) = 1
+        _NoiseBlur ("ぼかし (ピクセル, GrabPass)|Blur (pixels, GrabPass)", Range(0, 16)) = 0
+        [Toggle(_LUMI_RAYTRACE)] _UseRayTrace ("疑似レイトレーシング|Pseudo Ray Tracing", Float) = 0
+        _RTShadowStrength ("光線追跡の影の強さ|Ray Traced Shadow Strength", Range(0, 1)) = 1
+        _RTShadowLength ("影の光線の長さ (m)|Shadow Ray Length (m)", Range(0.05, 3)) = 0.6
+        _RTShadowSoftness ("影のやわらかさ (光源の角度)|Shadow Softness (light angle)", Range(0, 15)) = 3
+        _RTShadowRays ("影の光線の数|Shadow Rays", Range(1, 4)) = 2
+        _RTShadowSteps ("影のステップ数|Shadow Steps", Range(4, 24)) = 12
+        _RTShadowThickness ("影: 物の厚み (m)|Shadow: Object Thickness (m)", Range(0.01, 1)) = 0.15
+        _RTShadowBias ("影: 開始オフセット (m)|Shadow: Start Offset (m)", Range(0, 0.05)) = 0.01
+        _RTAOStrength ("光線追跡 AO の強さ|Ray Traced AO Strength", Range(0, 2)) = 1
+        _RTAORadius ("AO の光線の長さ (m)|AO Ray Length (m)", Range(0.02, 2)) = 0.3
+        _RTAORays ("AO の光線の数|AO Rays", Range(2, 8)) = 4
+        _RTAOSteps ("AO のステップ数|AO Steps", Range(2, 8)) = 4
+        _RTAOThickness ("AO: 物の厚み (m)|AO: Object Thickness (m)", Range(0.01, 1)) = 0.2
+        _RTAOMultiBounce ("AO の照り返し (明るい色は暗くなりすぎない)|AO Multi-Bounce (bright colours darken less)", Range(0, 1)) = 1
+        _RTGIStrength ("照り返しの強さ|Bounce Strength", Range(0, 2)) = 1
+        _RTGIRays ("照り返しの光線の数|Bounce Rays", Range(1, 8)) = 4
+        _RTGILength ("照り返しの光線の長さ (m)|Bounce Ray Length (m)", Range(0.1, 5)) = 1.5
+        _RTGISpecular ("照り返しのハイライト|Bounce Highlight", Range(0, 2)) = 1
+        _RTGIMaxBright ("光る物の明るさの上限|Max Brightness of Glowing Things", Range(1, 16)) = 4
+        _RTReflStrength ("映り込みの強さ|Reflection Strength", Range(0, 1)) = 1
+        _RTReflLength ("映り込みの光線の長さ (m)|Reflection Ray Length (m)", Range(0.2, 20)) = 5
+        _RTReflSteps ("映り込みのステップ数|Reflection Steps", Range(8, 48)) = 24
+        _RTReflThickness ("映り込み: 物の厚み (m)|Reflection: Object Thickness (m)", Range(0.02, 2)) = 0.3
+        _RTReflRoughCut ("映り込むざらつきの上限|Max Roughness for Reflections", Range(0.05, 1)) = 0.6
+        _RTMaxDistance ("有効距離 (m)|Max Distance (m)", Range(1, 50)) = 10
 
         // ---------- SSS / Backlight ----------
         [Toggle(_LUMI_SSS)] _UseSSS ("サブサーフェス (肌)|Subsurface (Skin)", Float) = 0
@@ -501,6 +559,19 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
         _AudioLinkStrength ("強度|Strength", Range(0, 4)) = 1
         _AudioLinkMin ("最小値|Minimum", Range(0, 1)) = 0
         _AudioLinkDelay ("UV.x 遅延|Delay by UV.x", Range(0, 1)) = 0
+
+        // ---------- AudioLink (standalone) ----------
+        [ToggleUI] _UseALSolo ("AudioLink (単体)|AudioLink (standalone)", Float) = 0
+        [HDR] _ALColor ("発光色|Glow Color", Color) = (1, 1, 1, 1)
+        _ALMask ("マスク|Mask", 2D) = "white" {}
+        [Enum(Bass,0,LowMid,1,HighMid,2,Treble,3,All Bands,4)] _ALBand ("帯域|Band", Float) = 0
+        [Enum(Whole,0,UV Horizontal,1,UV Vertical,2,From UV Center,3)] _ALWaveMode ("波の広がり方|Wave Spread", Float) = 0
+        _ALWaveLength ("波の長さ (過去へさかのぼる量)|Wave Length (history)", Range(0, 1)) = 0.5
+        _ALStrength ("強度|Strength", Range(0, 10)) = 1
+        _ALMin ("無音時の明るさ|Level When Silent", Range(0, 1)) = 0
+        _ALMainBlend ("メインカラーの乗算|Multiply Main Color", Range(0, 1)) = 0
+        _ALOutline ("輪郭線も光らせる|Outline Glow", Range(0, 1)) = 0
+        _ALNoSignal ("AudioLink が無いワールドでの明るさ|Level Without AudioLink", Range(0, 1)) = 0
 
         // ---------- Dissolve / Fade ----------
         [Toggle(_LUMI_DISSOLVE)] _UseDissolve ("ディゾルブ|Dissolve", Float) = 0
@@ -781,6 +852,7 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
         _CharDesaturate ("キャラ全体の彩度を下げる|Character Desaturate", Range(0, 1)) = 0
         [HDR] _CharLerpColor ("キャラ全体を塗る色 (A=量)|Character Fill Color (A=amount)", Color) = (1, 1, 1, 0)
         _OutlineFOVCompensate ("FOV で太さを補正|FOV Compensation", Range(0, 1)) = 0.5
+        [ToggleUI] _AvatarScaleFollow ("アバターの大きさに合わせる|Follow Avatar Scale", Float) = 1
 
         // ---------- v1.3: detail parameters ----------
         _SHSoftness ("環境光の方向性 (トゥーン)|Ambient Directionality (toon)", Range(0, 1)) = 0.666
@@ -886,7 +958,7 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma fragment fragOutline
             #pragma multi_compile_fwdbase nolightmap nodynlightmap nodirlightmap
             #pragma multi_compile_domain _ FOG_LINEAR FOG_EXP FOG_EXP2
-            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED
+            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED LIGHTPROBE_SH
             #pragma multi_compile_instancing
             #pragma shader_feature_local _ _ALPHATEST_ON _ALPHABLEND_ON _ALPHAPREMULTIPLY_ON
             #pragma shader_feature_local _LUMI_TONEMAP
@@ -925,9 +997,10 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma hull tessHull
             #pragma domain tessDom_vert
             #pragma fragment fragBase
+            #pragma shader_feature_local _LUMI_RAYTRACE
             #pragma multi_compile_fwdbase nolightmap nodynlightmap nodirlightmap
             #pragma multi_compile_domain _ FOG_LINEAR FOG_EXP FOG_EXP2
-            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED
+            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED LIGHTPROBE_SH
             #pragma multi_compile_instancing
             #pragma shader_feature_local _ _ALPHATEST_ON _ALPHABLEND_ON _ALPHAPREMULTIPLY_ON
             #pragma shader_feature_local _LUMI_LAYER
@@ -940,6 +1013,7 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma shader_feature_local _LUMI_SSS
             #pragma shader_feature_local _LUMI_FACESDF
             #pragma shader_feature_local _LUMI_COMPAT
+            #pragma shader_feature_local _LUMI_URPSHADING
             #pragma shader_feature_local _LUMI_BACKLIGHT
             #pragma shader_feature_local _LUMI_ANISO
             #pragma shader_feature_local _LUMI_SHEEN
@@ -999,9 +1073,10 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma hull tessHull
             #pragma domain tessDom_vert
             #pragma fragment fragAdd
+            #pragma shader_feature_local _LUMI_RAYTRACE
             #pragma multi_compile_fwdadd_fullshadows
             #pragma multi_compile_domain _ FOG_LINEAR FOG_EXP FOG_EXP2
-            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED
+            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED LIGHTPROBE_SH
             #pragma multi_compile_instancing
             #pragma shader_feature_local _ _ALPHATEST_ON _ALPHABLEND_ON _ALPHAPREMULTIPLY_ON
             #pragma shader_feature_local _LUMI_LAYER
@@ -1011,6 +1086,7 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma shader_feature_local _LUMI_SSS
             #pragma shader_feature_local _LUMI_FACESDF
             #pragma shader_feature_local _LUMI_COMPAT
+            #pragma shader_feature_local _LUMI_URPSHADING
             #pragma shader_feature_local _LUMI_BACKLIGHT
             #pragma shader_feature_local _LUMI_ANISO
             #pragma shader_feature_local _LUMI_SHEEN
@@ -1028,13 +1104,14 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
 
         Pass
         {
-            Name "FORWARD"
+            Name "FORWARD_FX"
             Tags { "LightMode" = "ForwardBase" }
             Cull Back
             ZWrite [_ZWrite]
             ZTest [_ZTest]
-            Blend [_SrcBlend] [_DstBlend], One OneMinusSrcAlpha
-            AlphaToMask [_AlphaToMask]
+            Blend One Zero
+            ColorMask RGBA
+            AlphaToMask Off
             Offset [_OffsetFactor], [_OffsetUnits]
 
             CGPROGRAM
@@ -1043,9 +1120,10 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma hull tessHull
             #pragma domain tessDom_vert
             #pragma fragment fragBase
+            #pragma shader_feature_local _LUMI_RAYTRACE
             #pragma multi_compile_fwdbase nolightmap nodynlightmap nodirlightmap
             #pragma multi_compile_domain _ FOG_LINEAR FOG_EXP FOG_EXP2
-            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED
+            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED LIGHTPROBE_SH
             #pragma multi_compile_instancing
             #pragma shader_feature_local _ _ALPHATEST_ON _ALPHABLEND_ON _ALPHAPREMULTIPLY_ON
             #pragma shader_feature_local _LUMI_LAYER
@@ -1058,6 +1136,7 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma shader_feature_local _LUMI_SSS
             #pragma shader_feature_local _LUMI_FACESDF
             #pragma shader_feature_local _LUMI_COMPAT
+            #pragma shader_feature_local _LUMI_URPSHADING
             #pragma shader_feature_local _LUMI_BACKLIGHT
             #pragma shader_feature_local _LUMI_ANISO
             #pragma shader_feature_local _LUMI_SHEEN
@@ -1084,6 +1163,77 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma shader_feature_local _LUMI_HOLOGRAM
             #pragma shader_feature_local _LUMI_DEPTHSHADOW
             #pragma shader_feature_local _LUMI_FPSMODE
+            #define LUMI_FX_WRITE 1
+            #include "Include/MitToonPassBIRP.hlsl"
+            #include "Include/MitToonTessellation.hlsl"
+            ENDCG
+        }
+
+        // clean blur: the FX pass writes the AO / shadow terms, the grab copies them, the main pass blurs them.
+        // Switched off per material (SetShaderPassEnabled "Always") while Blur is 0: no copy then.
+        GrabPass { Tags { "LightMode" = "Always" } }
+
+        Pass
+        {
+            Name "FORWARD"
+            Tags { "LightMode" = "ForwardBase" }
+            Cull Back
+            ZWrite [_ZWrite]
+            ZTest [_ZTest]
+            Blend [_SrcBlend] [_DstBlend], One OneMinusSrcAlpha
+            AlphaToMask [_AlphaToMask]
+            Offset [_OffsetFactor], [_OffsetUnits]
+
+            CGPROGRAM
+            #pragma target 5.0
+            #pragma vertex tessVert
+            #pragma hull tessHull
+            #pragma domain tessDom_vert
+            #pragma fragment fragBase
+            #pragma shader_feature_local _LUMI_RAYTRACE
+            #pragma multi_compile_fwdbase nolightmap nodynlightmap nodirlightmap
+            #pragma multi_compile_domain _ FOG_LINEAR FOG_EXP FOG_EXP2
+            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED LIGHTPROBE_SH
+            #pragma multi_compile_instancing
+            #pragma shader_feature_local _ _ALPHATEST_ON _ALPHABLEND_ON _ALPHAPREMULTIPLY_ON
+            #pragma shader_feature_local _LUMI_LAYER
+            #pragma shader_feature_local _LUMI_NORMALMAP
+            #pragma shader_feature_local _LUMI_DETAIL
+            #pragma shader_feature_local _LUMI_PARALLAX
+            #pragma shader_feature_local _LUMI_SSAO
+            #pragma shader_feature_local _LUMI_SOFTSHADOW
+            #pragma shader_feature_local _LUMI_CONTACTSHADOW
+            #pragma shader_feature_local _LUMI_SSS
+            #pragma shader_feature_local _LUMI_FACESDF
+            #pragma shader_feature_local _LUMI_COMPAT
+            #pragma shader_feature_local _LUMI_URPSHADING
+            #pragma shader_feature_local _LUMI_BACKLIGHT
+            #pragma shader_feature_local _LUMI_ANISO
+            #pragma shader_feature_local _LUMI_SHEEN
+            #pragma shader_feature_local _LUMI_CLEARCOAT
+            #pragma shader_feature_local _LUMI_RIM
+            #pragma shader_feature_local _LUMI_MATCAP
+            #pragma shader_feature_local _LUMI_GLITTER
+            #pragma shader_feature_local _LUMI_EMISSION
+            #pragma shader_feature_local _LUMI_AUDIOLINK
+            #pragma shader_feature_local _LUMI_DISSOLVE
+            #pragma shader_feature_local _LUMI_DISTFADE
+            #pragma shader_feature_local _LUMI_TONEMAP
+            #pragma shader_feature_local _LUMI_LIGHTVOLUMES
+            #pragma shader_feature_local _LUMI_LV_LITE
+            #pragma shader_feature_local _LUMI_SPHERENORMAL
+            #pragma shader_feature_local _LUMI_OFFSETRIM
+            #pragma shader_feature_local _LUMI_CURVATURE
+            #pragma shader_feature_local _LUMI_IRIDESCENCE
+            #pragma shader_feature_local _LUMI_BOUNCE
+            #pragma shader_feature_local _LUMI_FILLLIGHT
+            #pragma shader_feature_local _LUMI_GRADIENT
+            #pragma shader_feature_local _LUMI_HATCH
+            #pragma shader_feature_local _LUMI_ANGELRING
+            #pragma shader_feature_local _LUMI_HOLOGRAM
+            #pragma shader_feature_local _LUMI_DEPTHSHADOW
+            #pragma shader_feature_local _LUMI_FPSMODE
+            #define LUMI_FX_READ 1
             #include "Include/MitToonPassBIRP.hlsl"
             #include "Include/MitToonTessellation.hlsl"
             ENDCG
@@ -1107,9 +1257,10 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma hull tessHull
             #pragma domain tessDom_vert
             #pragma fragment fragAdd
+            #pragma shader_feature_local _LUMI_RAYTRACE
             #pragma multi_compile_fwdadd_fullshadows
             #pragma multi_compile_domain _ FOG_LINEAR FOG_EXP FOG_EXP2
-            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED
+            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED LIGHTPROBE_SH
             #pragma multi_compile_instancing
             #pragma shader_feature_local _ _ALPHATEST_ON _ALPHABLEND_ON _ALPHAPREMULTIPLY_ON
             #pragma shader_feature_local _LUMI_LAYER
@@ -1119,6 +1270,7 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma shader_feature_local _LUMI_SSS
             #pragma shader_feature_local _LUMI_FACESDF
             #pragma shader_feature_local _LUMI_COMPAT
+            #pragma shader_feature_local _LUMI_URPSHADING
             #pragma shader_feature_local _LUMI_BACKLIGHT
             #pragma shader_feature_local _LUMI_ANISO
             #pragma shader_feature_local _LUMI_SHEEN
@@ -1129,6 +1281,44 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma shader_feature_local _LUMI_SPHERENORMAL
             #pragma shader_feature_local _LUMI_GRADIENT
             #pragma shader_feature_local _LUMI_FPSMODE
+            #include "Include/MitToonPassBIRP.hlsl"
+            #include "Include/MitToonTessellation.hlsl"
+            ENDCG
+        }
+
+        // the shadow light's soft shadow (MitToon ShadowLight): multiplies what is drawn, never adds light
+        Pass
+        {
+            Name "SHADOW_LIGHT"
+            Tags { "LightMode" = "ForwardAdd" }
+            Cull Back
+            ZWrite Off
+            ZTest LEqual
+            Blend DstColor Zero, Zero One
+            Offset [_OffsetFactor], [_OffsetUnits]
+
+            CGPROGRAM
+            #pragma target 5.0
+            #pragma vertex tessVert
+            #pragma hull tessHull
+            #pragma domain tessDom_vert
+            #pragma fragment fragShadowLight
+            #pragma multi_compile_fwdadd_fullshadows
+            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED LIGHTPROBE_SH POINT POINT_COOKIE DIRECTIONAL DIRECTIONAL_COOKIE SHADOWS_CUBE SHADOWS_SCREEN
+            #pragma multi_compile_instancing
+            #pragma shader_feature_local _ _ALPHATEST_ON _ALPHABLEND_ON _ALPHAPREMULTIPLY_ON
+            #pragma shader_feature_local _LUMI_LAYER
+            #pragma shader_feature_local _LUMI_NORMALMAP
+            #pragma shader_feature_local _LUMI_DETAIL
+            #pragma shader_feature_local _LUMI_PARALLAX
+            #pragma shader_feature_local _LUMI_COMPAT
+            #pragma shader_feature_local _LUMI_URPSHADING
+            #pragma shader_feature_local _LUMI_DISSOLVE
+            #pragma shader_feature_local _LUMI_DISTFADE
+            #pragma shader_feature_local _LUMI_SPHERENORMAL
+            #pragma shader_feature_local _LUMI_GRADIENT
+            #pragma shader_feature_local _LUMI_FPSMODE
+            #define LUMI_SHADOW_LIGHT_PASS 1
             #include "Include/MitToonPassBIRP.hlsl"
             #include "Include/MitToonTessellation.hlsl"
             ENDCG
@@ -1164,7 +1354,7 @@ Shader "MitToon/MitToon Outline TwoPass Tessellation"
             #pragma fragment fragOutline2
             #pragma multi_compile_fwdbase nolightmap nodynlightmap nodirlightmap noshadow
             #pragma multi_compile_domain _ FOG_LINEAR FOG_EXP FOG_EXP2
-            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED
+            #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED LIGHTPROBE_SH
             #pragma multi_compile_instancing
             #pragma shader_feature_local _ _ALPHATEST_ON _ALPHABLEND_ON _ALPHAPREMULTIPLY_ON
             #pragma shader_feature_local _LUMI_TONEMAP

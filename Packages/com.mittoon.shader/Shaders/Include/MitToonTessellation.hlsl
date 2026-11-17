@@ -140,7 +140,10 @@ appdata LumiTessInterpolate(const OutputPatch<LumiTessCP, 3> p, float3 bc)
     appdata v = (appdata)0;
     #define LUMI_TESS_BARY(f) (p[0].f * bc.x + p[1].f * bc.y + p[2].f * bc.z)
     float3 pos = LUMI_TESS_BARY(vertex.xyz);
-    v.normal = normalize(LUMI_TESS_BARY(normal));
+    // (a skinned normal is as long as the avatar's scale (see LumiVertexScale): the length is kept, the corners'
+    // planes below use unit normals)
+    float3 nl = float3(length(p[0].normal), length(p[1].normal), length(p[2].normal));
+    v.normal = normalize(LUMI_TESS_BARY(normal)) * dot(nl, bc);
     float4 t = LUMI_TESS_BARY(tangent);
     v.tangent = float4(normalize(t.xyz + 1e-6), p[0].tangent.w);
     v.uv0 = LUMI_TESS_BARY(uv0);
@@ -149,9 +152,10 @@ appdata LumiTessInterpolate(const OutputPatch<LumiTessCP, 3> p, float3 bc)
     // Phong tessellation: project onto each corner's tangent plane and blend, rounding the silhouette
     if (_TessPhong > 0.001)
     {
-        float3 q0 = pos - dot(pos - p[0].vertex.xyz, p[0].normal) * p[0].normal;
-        float3 q1 = pos - dot(pos - p[1].vertex.xyz, p[1].normal) * p[1].normal;
-        float3 q2 = pos - dot(pos - p[2].vertex.xyz, p[2].normal) * p[2].normal;
+        float3 n0 = p[0].normal / max(nl.x, 1e-6), n1 = p[1].normal / max(nl.y, 1e-6), n2 = p[2].normal / max(nl.z, 1e-6);
+        float3 q0 = pos - dot(pos - p[0].vertex.xyz, n0) * n0;
+        float3 q1 = pos - dot(pos - p[1].vertex.xyz, n1) * n1;
+        float3 q2 = pos - dot(pos - p[2].vertex.xyz, n2) * n2;
         float3 phong = q0 * bc.x + q1 * bc.y + q2 * bc.z;
         float3 w = float3(p[0].mask.x * (1 - p[0].mask.y), p[1].mask.x * (1 - p[1].mask.y), p[2].mask.x * (1 - p[2].mask.y));
         float m = dot(w, bc);

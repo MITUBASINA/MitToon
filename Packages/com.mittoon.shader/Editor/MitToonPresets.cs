@@ -48,6 +48,8 @@ namespace MitToon.Editor
             "_RichWrap", "_RichTerminatorColor", "_RichColorDepth", "_RichShadowSaturation", "_RichSoftSpec", "_RichSoftSpecRoughness",
             "_RichGloss", "_RichAmbientRim", "_QShadowComplement", "_WorldAdapt",
             "_LightColorMode", "_LightMapMode", "_AutoShadowColor",
+            "_UseRim2", "_Rim2Color", "_Rim2Border", "_Rim2Blur", "_Rim2FresnelPower", "_Rim2LightDir", "_Rim2ShadowMask",
+            "_RimMainStrength", "_RimLitSideOnly", "_Shadow2ndBorder", "_SSAOColor",
         };
         static void ResetStyle(Material m)
         {
@@ -104,6 +106,31 @@ namespace MitToon.Editor
                 F(m, "_UseRim", 1); F(m, "_RimFresnelPower", 5f); F(m, "_RimBorder", 0.55f); F(m, "_RimBlur", 1f); F(m, "_RimLightDir", 0.8f);
                 C(m, "_RimColor", new Color(1f, 0.97f, 0.95f, 0.18f)); F(m, "_RimShadowMask", 0.8f);
                 Grade(m, 3, 0.35f, 1.05f, 1.08f, 0.15f);
+            }},
+            // high quality MMD video look: bright and punchy cel shading, shadows that keep the colour of the surface (warm on
+            // skin, lilac on white cloth), a crisp white rim on every silhouette (depth rim, toward the light) plus a soft cool
+            // rim on the other side, hair shadow on the face, light colourful AO and a vivid grade
+            new Preset { id = "mmdpv", category = Style, jp = "MMD 動画風 (明るいセル + 白リム)", en = "MMD Video (bright cel + white rim)", apply = m =>
+            {
+                ResetStyle(m);
+                F(m, "_CompatShading", 0); F(m, "_URPShading", 0);   // MitToon's own cel shading (also after a lilToon conversion)
+                F(m, "_AutoShadowColor", 0.45f); F(m, "_LightColorMode", 3);
+                F(m, "_ToonAmount", 1); F(m, "_ShadowBlur", 0.03f); F(m, "_Shadow2ndBorder", 0.2f); F(m, "_Shadow2ndBlur", 0.06f);
+                C(m, "_Shadow2ndColor", new Color(0.72f, 0.7f, 0.9f, 0.35f));
+                C(m, "_ShadowBorderColor", new Color(1f, 0.5f, 0.45f, 0.3f)); F(m, "_ShadowBorderRange", 0.04f);
+                F(m, "_RichShadowSaturation", 0.4f); F(m, "_RichColorDepth", 0.2f); C(m, "_RichTerminatorColor", new Color(1f, 0.5f, 0.4f, 0.15f));
+                F(m, "_ShadowEnvStrength", 0.2f); F(m, "_AmbientFlatten", 0.5f); F(m, "_LightMinLimit", 0.18f); F(m, "_LightMaxLimit", 1.2f);
+                F(m, "_SpecularToony", 0.9f); F(m, "_SpecularStrength", 0.5f); F(m, "_EnvReflStrength", 0.25f);
+                // rim 1: crisp white edge on the silhouette, mostly on the lit side
+                F(m, "_UseRim", 1); F(m, "_RimMode", 1); F(m, "_RimDepthWidth", 0.45f); F(m, "_RimDepthThreshold", 0.06f);
+                C(m, "_RimColor", new Color(1f, 1f, 1f, 0.75f)); F(m, "_RimLightDir", 0.45f); F(m, "_RimShadowMask", 0.4f);
+                // rim 2: soft cool fresnel glow around the rest of the outline
+                F(m, "_UseRim2", 1); C(m, "_Rim2Color", new Color(0.7f, 0.82f, 1f, 0.35f)); F(m, "_Rim2Border", 0.62f); F(m, "_Rim2Blur", 0.35f);
+                F(m, "_Rim2FresnelPower", 3.5f); F(m, "_Rim2LightDir", 0); F(m, "_Rim2ShadowMask", 0);
+                F(m, "_UseSoftShadow", 1); F(m, "_ShadowSmoothness", 0.15f); F(m, "_UseContactShadow", 1);
+                F(m, "_UseDepthShadow", 1); F(m, "_DepthShadowWidth", 0.8f); F(m, "_DepthShadowStrength", 0.7f);
+                F(m, "_UseSSAO", 1); F(m, "_SSAOStrength", 0.45f); C(m, "_SSAOColor", new Color(0.35f, 0.25f, 0.36f));
+                Grade(m, 5, 0.2f, 1.06f, 1.08f, 0.1f);
             }},
             new Preset { id = "semireal", category = Style, jp = "リアル寄りアニメ", en = "Semi Realistic", apply = m =>
             {
@@ -259,6 +286,7 @@ namespace MitToon.Editor
         {
             foreach (var p in All) if (p.id == id) p.apply(m);
             MitToonShaderGUI.SyncKeywords(m);
+            MitToonShadowLight.EnablePCSSWhereShadowLight(new[] { m });   // keep the avatar's shadow light working
         }
     }
 }

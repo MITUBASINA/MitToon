@@ -195,6 +195,28 @@ float LumiAudioLinkMul(float4 al, float2 uv0)
     return m;
 }
 
+// standalone AudioLink: the music level at a UV (strength not applied), spread over the surface as a wave (the
+// AudioLink history: farther along the wave = longer ago). Band 4 = all four bands averaged. Without an AudioLink world
+// the "no AudioLink" level.
+float LumiALSoloLevel(float2 uv)
+{
+    if (_AudioTexture_TexelSize.z <= 16) return _ALNoSignal;
+    float2 f = frac(uv);
+    float coord = _ALWaveMode < 0.5 ? 0.0 : _ALWaveMode < 1.5 ? f.x : _ALWaveMode < 2.5 ? f.y : saturate(length(f - 0.5) * 2.0);
+    int x = (int)(coord * _ALWaveLength * 127.0);
+    float v;
+    [branch] if (_ALBand > 3.5)
+        v = 0.25 * (_AudioTexture.Load(int3(x, 0, 0)).r + _AudioTexture.Load(int3(x, 1, 0)).r + _AudioTexture.Load(int3(x, 2, 0)).r + _AudioTexture.Load(int3(x, 3, 0)).r);
+    else
+        v = _AudioTexture.Load(int3(x, (int)_ALBand, 0)).r;
+    return lerp(_ALMin, 1.0, v);
+}
+// its glow (colour x mask x level x strength), for the surface and the outline
+float3 LumiALSoloGlow(float2 uv)
+{
+    return _ALColor.rgb * (_ALColor.a * _ALStrength * LUMI_SAMPLE(_ALMask, LUMI_TF(_ALMask, uv)).r * LumiALSoloLevel(uv));
+}
+
 float3 LumiEmissionLayer(LumiInputData d, Texture2D map, Texture2D mask, float4 maskST, float4 st, float4 color, float uvCh, float4 scroll, float4 blink, float4 rb)
 {
     float2 uvBase = LumiSelectUV(d, uvCh);
@@ -246,6 +268,11 @@ float3 LumiSampleEmission(LumiInputData d, LumiSurface s)
         if (_Emission4AudioLink > 0.5) e4 *= LumiAudioLinkMul(float4(_Emission4ALBand, _Emission4ALStrength, _Emission4ALMin, _Emission4ALDelay), d.uv0);
         e += e4;
     }
+#endif
+#if defined(_LUMI_AUDIOLINK)
+    // standalone AudioLink (works without the emission slots)
+    [branch] if (_UseALSolo > 0.5)
+        e += LumiALSoloGlow(d.uv0) * lerp(1.0.xxx, s.albedo, _ALMainBlend);
 #endif
     return e;
 }

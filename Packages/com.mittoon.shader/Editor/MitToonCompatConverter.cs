@@ -32,7 +32,9 @@ namespace MitToon.Editor
         public static List<string> Convert(Material m)
         {
             var sn = Take(m);
-            return IsFakeShadowSource(m.shader) ? ApplyFakeShadow(m, sn) : Apply(m, sn);
+            var notes = IsFakeShadowSource(m.shader) ? ApplyFakeShadow(m, sn) : Apply(m, sn);
+            MitToonShadowLight.EnablePCSSWhereShadowLight(new[] { m });   // the avatar already has a shadow light: its shadow keeps working
+            return notes;
         }
 
         public static List<string> ApplyFakeShadow(Material m, Snapshot sn)

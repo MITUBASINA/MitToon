@@ -27,6 +27,7 @@ struct LumiGI
     float  ambScale;         // ambient energy left after moving some into the auto key
     float3 autoKey;          // auto key light color (added along the toon direction)
     float3 dirHint;          // unnormalised direction hint: SH / scenery / point lights / default key
+    float3 worldHint;        // the same without the camera relative default key (for shadows: they must not turn with the view)
     float  worldLum;
 };
 
@@ -110,6 +111,7 @@ LumiGI LumiGatherGI(float3 mainColor, float3 posWS)
 
     // direction hint. A world with no direction at all gets a camera relative upper front key.
     float3 viewKey = LumiViewToWorldDir(normalize(float3(-0.35, 0.55, 0.75)));
+    gi.worldHint = l1 + pointDir * (_AutoPointLights * autoW);
     gi.dirHint = l1 + pointDir * (_AutoPointLights * autoW)
                + viewKey * (ambLum * gi.flatness * saturate(1.0 - keyLum / max(ambLum, 1e-4)) * _AutoDefaultKey * autoW);
     return gi;

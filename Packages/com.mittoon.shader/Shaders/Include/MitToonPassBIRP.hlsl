@@ -5,6 +5,11 @@
 #include "MitToonPlatformBIRP.hlsl"
 #include "MitToonLighting.hlsl"
 
+// PCSS soft shadows of shadowed spot lights (see LumiPCSS) and the shadow light (see fragShadowLight)
+#if defined(SPOT) && defined(SHADOWS_DEPTH) && defined(SHADOWS_NATIVE) && !defined(SHADER_API_MOBILE)
+#define LUMI_HAS_PCSS 1
+#endif
+
 struct appdata
 {
     float4 vertex  : POSITION;
@@ -25,7 +30,7 @@ struct v2f
     float4 tangentWS : TEXCOORD3;
     float4 color     : TEXCOORD4;
     float4 screenPos : TEXCOORD5;
-    float3 posOS     : TEXCOORD6;
+    float4 posOS     : TEXCOORD6;    // w: the avatar's scale (LumiVertexScale)
     UNITY_SHADOW_COORDS(7)
     LUMI_FOG_COORDS(8)
 #if defined(UNITY_PASS_FORWARDBASE)
@@ -42,6 +47,11 @@ struct v2f
     float4 lv2       : TEXCOORD15;
     #endif
 #endif
+#if defined(LUMI_RT_COMPOSITE)
+    float4 rtgi0     : TEXCOORD17;   // ray traced bounce probe per vertex (see LumiRTGIVertex)
+    float4 rtgi1     : TEXCOORD18;
+    float4 rtgi2     : TEXCOORD19;
+#endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
 };
@@ -49,6 +59,16 @@ struct v2f
 // ---------------------------------------------------------------------------
 // FPS mode: coherent noise that only changes every 1/FPS seconds (hand drawn "boiling" at a low frame rate)
 float LumiObjectScale() { return length(unity_ObjectToWorld._m00_m10_m20); }
+// the avatar's scale. Skinned meshes are drawn with the scale of their bones baked into the vertices and a matrix
+// without it, but their normals keep it (Unity does not normalise them again after skinning). The lengths given in
+// m / cm (outline width, depth rim, depth shadow ...) follow it, so a resized avatar (VRChat avatar scaling, the small
+// avatar of the menu preview) keeps its look.
+float LumiVertexScale(float3 normalOS)
+{
+    float l = length(normalOS);
+    float s = LumiObjectScale() * (l > 1e-4 ? l : 1.0);
+    return lerp(1.0, clamp(s, 1e-3, 1e3), _AvatarScaleFollow);
+}
 float3 LumiFPSOffsetOS(float3 posOS, float3 normalOS)
 {
 #if defined(_LUMI_FPSMODE)
@@ -214,7 +234,7 @@ v2f vert(appdata v)
         v.vertex.xyz = mul(unity_WorldToObject, float4(o.posWS, 1)).xyz;
     }
     o.normalWS = LumiObjectToWorldNormal(v.normal);
-    o.posOS = v.vertex.xyz;
+    o.posOS = float4(v.vertex.xyz, LumiVertexScale(v.normal));
     o.pos = LumiPerspectiveRemoval(UnityWorldToClipPos(o.posWS));
     if (LumiHidden(v)) o.pos = LUMI_NAN4;
     o.uv01 = float4(v.uv0, v.uv1);
@@ -245,6 +265,36 @@ v2f vert(appdata v)
     LumiLVVertex(o.posWS, normalize(o.normalWS), o.lv0, o.lv1, o.lv2);
     #endif
 #endif
+#if defined(LUMI_RT_COMPOSITE)
+    LumiRTGIVertex(o.posWS, o.normalWS, o.rtgi0, o.rtgi1, o.rtgi2);
+#endif
+    // passes that would draw nothing are not rasterised at all (no pixel runs): the FX pass with the blur off, the
+    // RayTrace composite pass with nothing to add (ray tracing off, bounce and reflections off, see through surfaces
+    // (not in the depth texture), no depth texture)
+#if defined(LUMI_FX_WRITE)
+    if (!LumiFXActive()) o.pos = LUMI_NAN4;
+#endif
+    // the shadow light (a shadowed spot of almost no brightness) is drawn by its own pass (fragShadowLight), only on
+    // surfaces with PCSS that it can darken; every other light by the additive light pass
+#if defined(UNITY_PASS_FORWARDADD)
+    bool shadowLight = max(_LightColor0.r, max(_LightColor0.g, _LightColor0.b)) < 0.02;
+  #if defined(LUMI_SHADOW_LIGHT_PASS)
+    #if defined(LUMI_HAS_PCSS)
+    if (!shadowLight || _UsePCSS < 0.5 || abs(_DstBlendAdd - 5) > 0.5) o.pos = LUMI_NAN4;
+    #else
+    o.pos = LUMI_NAN4;
+    #endif
+  #elif defined(LUMI_HAS_PCSS)
+    if (shadowLight) o.pos = LUMI_NAN4;
+  #endif
+#endif
+#if defined(LUMI_RT_COMPOSITE)
+    #if !defined(_LUMI_RAYTRACE) || defined(_ALPHABLEND_ON) || defined(_ALPHAPREMULTIPLY_ON)
+    o.pos = LUMI_NAN4;
+    #else
+    if (_RTGIStrength + _RTGISpecular + _RTReflStrength <= 0.001 || !LumiDepthTextureAvailable()) o.pos = LUMI_NAN4;
+    #endif
+#endif
     return o;
 }
 
@@ -254,7 +304,8 @@ LumiInputData LumiBuildInput(v2f i, float facing)
     d.uv0 = i.uv01.xy;
     d.uv1 = i.uv01.zw;
     d.posWS = i.posWS;
-    d.posOS = i.posOS;
+    d.posOS = i.posOS.xyz;
+    lumiAvatarScale = i.posOS.w;
     d.normalWS = i.normalWS;
     d.tangentWS = i.tangentWS;
     d.viewDirWS = normalize(LumiGetEyePositionWS() - i.posWS);
@@ -283,10 +334,45 @@ float4 fragBase(v2f i, float facing : VFACE) : SV_Target
 {
     UNITY_SETUP_INSTANCE_ID(i);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
+#if defined(LUMI_RT_COMPOSITE)
+    lumiRTGIV0 = i.rtgi0; lumiRTGIV1 = i.rtgi1; lumiRTGIV2 = i.rtgi2;
+#endif
     LumiInputData d = LumiBuildInput(i, facing > 0 ? 1 : -1);
+#if defined(LUMI_RT_COMPOSITE)
+#if !defined(_LUMI_RAYTRACE)
+    discard;   // (pseudo ray tracing off)
+#endif
+    // nothing to add (bounce and reflections off): the main pass drew it all
+    if (_RTGIStrength + _RTGISpecular + _RTReflStrength <= 0.001) discard;
+    bool aoHand = LumiRTAOHandoff();
+#if defined(LUMI_RT_PYRAMID)
+    [branch] if (aoHand)
+    {
+        // the main pass's AO from the alpha, but at the three pixels the token of the blurred screen is in
+        float2 eye = LumiEyeSize();
+        int2 q = int2(LumiEyeLocal(d.screenUV) * eye), t0 = LumiRTTokenPx(eye);
+        if (q.y != t0.y || q.x < t0.x || q.x > t0.x + 2) lumiRTAOIn = LUMI_GRAB_SAMPLE4(LumiGrabUV(d.screenUV)).a;
+    }
+#endif
+#endif
+#if defined(LUMI_RT_COMPOSITE)
+    [branch] if (LumiScreenSpaceValidity(d) * LumiRTFade(d.eyeDepth) <= 0.001)
+    {
+        // every term the pass adds is scaled by these: nothing to add
+        if (!aoHand) discard;
+        return float4(LUMI_GRAB_SAMPLE(LumiGrabUV(d.screenUV)), 1.0);   // (the alpha back to 1 after the AO)
+    }
+#endif
     LumiNearDither(d);
     LumiSurface s = LumiInitSurface(d);
     lumiPixel = d.pixelPos;
+#if defined(LUMI_FX_WRITE)
+    if (!LumiFXActive()) discard;   // blur off: the FX pass draws nothing
+#endif
+#if defined(LUMI_FX_READ)
+    lumiFXUse = LumiFXActive();
+    [branch] if (lumiFXUse) LumiFXRead(d.screenUV, d.eyeDepth, d.pixelPos);
+#endif
 #if defined(_LUMI_LIGHTVOLUMES) && defined(UNITY_PASS_FORWARDBASE)
     LumiSetupAmbient(i.lv0, i.lv1, i.lv2, s.N, d.viewDirWS, s.f0, 1.0 - s.perceptualRough, true);
 #endif
@@ -305,6 +391,12 @@ float4 fragBase(v2f i, float facing : VFACE) : SV_Target
 #endif
 
     UNITY_LIGHT_ATTENUATION(atten, i, i.posWS);
+#if defined(LUMI_RT_COMPOSITE)
+    atten = 1;   // RayTrace composite pass: the shadow does not reach the reflections / bounce it draws
+#else
+    [branch] if (lumiFXUse) atten = lumiFX.z;   // blurred by the FX pass + grab
+    else
+    {
 #if defined(LUMI_HAS_SCREEN_SHADOW) && !defined(_ALPHABLEND_ON) && !defined(_ALPHAPREMULTIPLY_ON)
     [branch] if (_ReceiveCastShadow > 0.5)
     {
@@ -316,7 +408,13 @@ float4 fragBase(v2f i, float facing : VFACE) : SV_Target
         atten = saturate(soft + fade);
     }
 #endif
+#if defined(LUMI_HAS_SCREEN_SHADOW) && !defined(_ALPHABLEND_ON) && !defined(_ALPHAPREMULTIPLY_ON) && !defined(_LUMI_COMPAT)
+    atten = LumiQuadSmooth(atten.xxxx, d.eyeDepth, d.pixelPos).x;   // dots of the soft shadow taps
+#endif
     if (_ReceiveCastShadow < 0.5) atten = 1;   // cast shadows off: shading, contact / depth shadows and AO stay
+    }
+#endif
+    lumiFXOut.z = atten;
 #if defined(_LUMI_SOFTSHADOW)
     atten = LumiSmoothBorder(atten, 0.5, 0.5 * max(_ShadowSmoothness, 0.01) + 0.001) * step(0.001, _ShadowSmoothness) + atten * step(_ShadowSmoothness, 0.001);
 #endif
@@ -326,6 +424,19 @@ float4 fragBase(v2f i, float facing : VFACE) : SV_Target
 
     LumiCtx c;
     float4 col = LumiShadeBase(s, d, mainLight, c);
+#if defined(LUMI_FX_WRITE)
+    // (+ a vanishing use of the base colour: keeps _MainTex, whose sampler the other textures share, in the program)
+    return float4(lumiFXOut + s.albedo.r * 1e-9, LUMI_FX_MARK);
+#endif
+
+#if defined(LUMI_RT_COMPOSITE)
+    // RayTrace shader, second pass: the screen with this surface already drawn + what the rays found
+    float4 dr = float4(lumiRTDelta * i.fogFactor, 0);
+    float3 dl = lerp(dr.rgb, LumiQuadSmooth(dr, d.eyeDepth, d.pixelPos).rgb, lumiRTReflSmooth);   // dots of rough reflections only
+    if (!aoHand && dot(abs(dl), 1.0) < 1e-5) discard;   // (with the AO handed over every pixel puts the alpha back to 1)
+    float4 gc = LUMI_GRAB_SAMPLE4(LumiGrabUV(d.screenUV));
+    return float4(max(gc.rgb + dl, 0.0), aoHand ? 1.0 : 0.0);   // (alpha: back to 1 after the AO, or kept by the blend)
+#endif
 
 #if defined(UNITY_PASS_FORWARDBASE)
 #if !defined(_LUMI_COMPAT)
@@ -336,7 +447,11 @@ float4 fragBase(v2f i, float facing : VFACE) : SV_Target
     col.rgb = LumiDistanceFade(col.rgb, d, false);
     col.rgb = LumiFinalGrade(col.rgb, false);
     LUMI_APPLY_FOG(i, col);
-    return LumiOutputAlpha(col);
+    col = LumiOutputAlpha(col);
+#if defined(LUMI_RT_BASE)
+    if (LumiRTAOHandoff()) col.a = lumiFXOut.x;   // the AO for the composite pass (it puts the alpha back to 1)
+#endif
+    return col;
 }
 
 // ---------------------------------------------------------------------------
@@ -360,6 +475,154 @@ float LumiAddLightFalloff(float3 posWS)
 #endif
 }
 
+// ---------------------------------------------------------------------------
+// PCSS (percentage closer soft shadows) for shadowed spot lights: the blockers found around the pixel give how far the
+// shadow is from what casts it, and the filter grows with that distance (sharp at contact, soft further away).
+// Following the NVIDIA PCSS paper; the depths of the spot shadow map are linearised from unity_WorldToShadow itself.
+#if defined(LUMI_HAS_PCSS)
+float2 LumiVogel(int i, int n, float rot)
+{
+    float r = sqrt((i + 0.5) / n);
+    float th = i * 2.39996323 + rot * 6.2831853;
+    return r * float2(cos(th), sin(th));
+}
+float LumiPCSS(float3 posWS, float3 N, float2 pixel)
+{
+    posWS += N * (_PCSSReceiverBias * 0.01);   // receiver bias: lifts the sample off its own surface
+    float4x4 M = unity_WorldToShadow[0];
+    float4 sc = mul(M, float4(posWS, 1));
+    float3 coord = sc.xyz / sc.w;
+    float wR = sc.w;
+    // z = a * w + b along the light axis (the z row only depends on the axial distance)
+    float3 ax = M[3].xyz;
+    float axL2 = max(dot(ax, ax), 1e-12);
+    float a = dot(M[2].xyz, ax) / axL2;
+    float b = M[2].w - a * M[3].w;
+    float3 axN = ax * rsqrt(axL2);
+    float k = 0.5 * (length(M[0].xyz - dot(M[0].xyz, axN) * axN) + length(M[1].xyz - dot(M[1].xyz, axN) * axN));
+    float uvPerMeter = k / max(wR, 1e-5);
+    float wTex, hTex; _ShadowMapTexture.GetDimensions(wTex, hTex);
+    float texel = 1.0 / max(wTex, 1.0);
+
+    // receiver plane depth bias: the depth slope of the surface in shadow map space (wide kernels would self shadow)
+    float3 dx = ddx(coord), dy = ddy(coord);
+    float det = dx.x * dy.y - dx.y * dy.x;
+    float2 slope = abs(det) > 1e-12 ? float2(dy.y * dx.z - dx.y * dy.z, dx.x * dy.z - dy.x * dx.z) / det : 0;
+    slope = clamp(slope, -1.0, 1.0);
+
+    float rot = LumiSSNoise(pixel, posWS, max(_PCSSMaxBlur, _PCSSMinBlur) * 0.005, 0) * _PCSSJitter;
+    float lightR = _PCSSLightSize * 0.01 * 0.5;
+    int nF = (int)clamp(_PCSSSamples, 8, 64);
+    int nB = (int)max(nF * 0.5, 6.0);
+
+    // blocker search: blockers can sit anywhere between the light and the pixel; nearer ones reach further in the map
+    float rS = clamp(lightR * uvPerMeter * 3.0 * _PCSSSearchScale, texel * 2.0, texel * 48.0 * _PCSSSearchScale);
+    float sum = 0, cnt = 0;
+    [loop] for (int i = 0; i < nB; i++)
+    {
+        float2 o = LumiVogel(i, nB, rot) * rS;
+        float d = _ShadowMapTexture.SampleLevel(sampler_point_clamp, coord.xy + o, 0).r;
+        float zr = coord.z + dot(o, slope);
+#if defined(UNITY_REVERSED_Z)
+        if (d > zr) { sum += d; cnt += 1; }
+#else
+        if (d < zr) { sum += d; cnt += 1; }
+#endif
+    }
+    float sh = 0;
+    [branch] if (cnt < 0.5)
+    {
+        // no blocker found by the search (lit, or a rare miss inside the umbra): one hard tap decides
+        sh = _ShadowMapTexture.SampleCmpLevelZero(sampler_ShadowMapTexture, coord.xy, coord.z);
+    }
+    else
+    {
+        float den = sum / cnt - a;
+        float wB = clamp(b / (abs(den) > 1e-9 ? den : 1e-9), 1e-4, wR);
+        float pen = lightR * 2.0 * (wR - wB) / wB;          // penumbra width at the pixel, meters
+        pen = clamp(pen, _PCSSMinBlur * 0.01, max(_PCSSMaxBlur, _PCSSMinBlur) * 0.01);
+        // a sharp (anime) edge only needs where the half-shadow point is: a narrow filter keeps it from turning into noise
+        float rF = clamp(pen * 0.5 * uvPerMeter * lerp(1.0, 0.08, _PCSSToon), texel * lerp(0.5, 1.5, _PCSSTexelFilter), texel * 64.0);
+        [loop] for (int j = 0; j < nF; j++)
+        {
+            float2 o = LumiVogel(j, nF, rot + 0.37) * rF;
+            sh += _ShadowMapTexture.SampleCmpLevelZero(sampler_ShadowMapTexture, coord.xy + o, coord.z + dot(o, slope));
+        }
+        sh /= nF;
+    }
+    float wEdge = lerp(0.5, 0.03, _PCSSToon);
+    // the border moves the half-shadow point: right = the shadow spreads into the penumbra, left = it shrinks
+    // (a power curve: full shadow and full light stay, the value at the border becomes the half point)
+    sh = pow(saturate(sh), log(0.5) / log(clamp(_PCSSBorder, 0.02, 0.98)));
+    sh = saturate((sh - 0.5) / max(2.0 * wEdge, fwidth(sh) * 0.75) + 0.5);    // linear at sharpness 0; at 1 about one pixel wide (antialiased)
+    sh = lerp(_LightShadowData.r, 1.0, sh);
+    // fade out at the shadow distance like Unity's own shadows
+    float viewZ = dot(_WorldSpaceCameraPos - posWS, UNITY_MATRIX_V[2].xyz);
+    return saturate(sh + UnityComputeShadowFade(UnityComputeShadowFadeDistance(posWS, viewZ)));
+}
+#endif
+
+#if defined(LUMI_SHADOW_LIGHT_PASS)
+// shadow light (MitToon ShadowLight: a shadowed spot of almost no brightness). It adds no light: its soft shadow
+// multiplies what is already drawn (Blend DstColor Zero), so the shadow takes the world's own light and can never get
+// brighter than the lit surface, in any world. The fill colours are shares of what was drawn (they used to be added in
+// the scale of the scene's ambient setting, which in some worlds is far brighter than the real light: the shadows glowed).
+float4 fragShadowLight(v2f i, float facing : VFACE) : SV_Target
+{
+    UNITY_SETUP_INSTANCE_ID(i);
+    UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
+    LumiInputData d = LumiBuildInput(i, facing > 0 ? 1 : -1);
+    LumiNearDither(d);
+    LumiSurface s = LumiInitSurface(d);
+    lumiPixel = d.pixelPos;
+    float3 f = 1;
+#if defined(LUMI_HAS_PCSS)
+    float3 lDir = normalize(_WorldSpaceLightPos0.xyz - i.posWS * _WorldSpaceLightPos0.w);
+    float4 lc = mul(unity_WorldToLight, float4(i.posWS, 1));
+    float w = lc.z > 0 ? tex2D(_LightTexture0, lc.xy / lc.w + 0.5).w : 0;   // inside the cone
+    w *= LUMI_SAMPLE(_PCSSReceiveMask, LUMI_TF(_PCSSReceiveMask, s.uvMain)).r;
+    if (_PCSSDistanceFade > 0.01) w *= saturate(2.0 - 2.0 * d.eyeDepth / _PCSSDistanceFade);
+    float3 N = normalize(lerp(normalize(d.normalWS), s.N, _PCSSNormalStrength));
+    float NoL = dot(N, lDir);
+    // the shadow map is a geometric thing: gate it with the mesh normal, and let it reach the terminator
+    // (fading it out on the lit side left a bright band between the cast shadow and the shading)
+    float3 Ng = normalize(d.normalWS);
+    // with the shading on, the cast shadow runs up to the terminator (one shadow); without it, it fades
+    // before the terminator so no second, hard terminator line appears
+    float g0 = lerp(0.0, -0.25, saturate(_PCSSShading * 2.0));
+    float fc = smoothstep(g0, g0 + lerp(0.3, 0.25, saturate(_PCSSShading * 2.0)), dot(Ng, lDir));
+    [branch] if (w > 0.001)
+    {
+        float sh = fc > 0.001 ? LumiPCSS(i.posWS, Ng, d.pixelPos) : 1;
+        // faces turned away from the light: optional shading (soft terminator) instead of nothing
+        // (the border of that shading follows Sharpen Edge: soft lambert-like at 0, a toon line at 1)
+        float aw = lerp(0.01, 0.6, _PCSSShadingBlur);
+        float ac = 0.03 + (_PCSSShadingBorder - 0.5) * 1.2;   // right = the shading spreads to the lit side
+        // (direction from the world's light: the main pass shades along it, the shadow light only casts)
+        float away = _PCSSShading * (1 - smoothstep(ac - aw, ac + aw, NoL)) * (1 - _PCSSWorldLight);
+        // eye shadow guard: no bang / lid shadow and no shading inside the eye
+        float eyeG = LumiEyeGuard(s.uvMain);
+        away *= 1 - eyeG * _EyeGuardShade;
+        // one light: lit = (not turned away) x (not occluded), so the two shadows join without a seam
+        float occ = 1 - (1 - away) * (1 - fc * (1 - sh) * (1 - eyeG * _EyeGuardShadow));
+        float k = _PCSSShadowStrength * w * occ;
+        // a real shadow keeps a part of the light around it
+        float dark = 1 - k * (1 - saturate(_PCSSShadowKeep));
+        // fill colour, and the colourful part of the base colour (minus its grey) deepening the shadow hue (skin goes
+        // warm, not grey): per colour channel shares of what was drawn, at most back to the unshadowed colour
+        float3 dc = max(s.diffuseColor, 0.0);
+        float mn = min(dc.r, min(dc.g, dc.b));
+        float3 tint = k * (_PCSSShadowColor.rgb * _PCSSShadowColorStrength + _PCSSAutoColor * (dc - mn) / max(dc, 1e-4));
+        f = min(dark + tint, 1.0);
+        // coloured border in the penumbra (toon look)
+        float edge = fc * saturate(1 - abs(sh - 0.5) * 2.0 / max(_PCSSBorderWidth, 0.05));
+        f += edge * w * _PCSSBorderColor.a * _PCSSBorderColor.rgb;
+    }
+#endif
+    return float4(LumiQuadSmooth(float4(f, 0), d.eyeDepth, d.pixelPos).rgb, 1);   // (dots of the PCSS taps)
+}
+#endif
+
 float4 fragAdd(v2f i, float facing : VFACE) : SV_Target
 {
     UNITY_SETUP_INSTANCE_ID(i);
@@ -379,7 +642,15 @@ float4 fragAdd(v2f i, float facing : VFACE) : SV_Target
     l.shadowAttenuation = shadowOnly;
     l.distanceAttenuation = atten / max(shadowOnly, 1e-4);
     if (shadowOnly < 1e-4) { l.distanceAttenuation = 1; l.shadowAttenuation = atten; }
-    if (_ReceiveCastShadow < 0.5) { l.shadowAttenuation = 1; l.distanceAttenuation = LumiAddLightFalloff(i.posWS); }
+#if defined(LUMI_HAS_PCSS)
+    [branch] if (_UsePCSS > 0.5)   // also with the plain cast shadows turned off
+    {
+        l.shadowAttenuation = LumiQuadSmooth(LumiPCSS(i.posWS, normalize(d.normalWS), d.pixelPos).xxxx, d.eyeDepth, d.pixelPos).x;
+        l.distanceAttenuation = LumiAddLightFalloff(i.posWS);
+        lumiPCSSOn = 1;     // soft, so the coarse-map guard (_AddLightCastShadow) does not apply
+    }
+#endif
+    if (_ReceiveCastShadow < 0.5 && lumiPCSSOn < 0.5) { l.shadowAttenuation = 1; l.distanceAttenuation = LumiAddLightFalloff(i.posWS); }
 #if defined(POINT) || defined(POINT_COOKIE)
     {
         // the falloff texture cuts off hard at the light range: window it so the edge fades out smoothly
@@ -393,6 +664,9 @@ float4 fragAdd(v2f i, float facing : VFACE) : SV_Target
     c.V = d.viewDirWS;
     c.NoV = saturate(dot(s.N, c.V)) + 1e-4;
     c.litLight = l.color;
+#if defined(_LUMI_RAYTRACE)
+    lumiRTValidity = LUMI_URP_MODEL && _RTShadowStrength > 0.001 ? LumiScreenSpaceValidity(d) : 0;
+#endif
     c.rampLit = 1;
 
     float4 col = float4(LumiShadeAdditional(s, d, c, l), s.alpha);
@@ -406,6 +680,7 @@ float4 fragAdd(v2f i, float facing : VFACE) : SV_Target
 #elif !defined(_ALPHABLEND_ON) && !defined(_ALPHAPREMULTIPLY_ON)
     col.a = 0;
 #endif
+    if (abs(_DstBlendAdd - 5) < 0.5) col.a = 1;   // Blend One SrcAlpha (shadow light support): plain add
     return col;
 }
 
@@ -439,7 +714,8 @@ v2fOutline LumiOutlineVertex(appdata v, float widthCm, float zBiasCm)
     widthCm *= LumiFPSWidthJitter(v.vertex.xyz);
 #endif
     widthCm *= LumiInkWeight(v.vertex.xyz, v.normal);
-    float width = widthCm * 0.01; // cm -> m
+    float sc = LumiVertexScale(v.normal);
+    float width = widthCm * 0.01 * sc; // cm -> m, at the avatar's scale
     // the smooth normal bake also stores mask x vertex color width, averaged over vertices on one position:
     // sampled per UV, a mask tears the outline at UV seams (the two sides read different texels)
     if (_OutlineWidthBaked > 0.5 && _OutlineNormalSource > 0.5) width *= v.color.a;
@@ -454,19 +730,21 @@ v2fOutline LumiOutlineVertex(appdata v, float widthCm, float zBiasCm)
     if (_OutlineNormalSource > 1.5)
     {
         // smoothed normal baked in vertex color RGB, tangent space (survives skinning)
+        // (unit vectors: skinned ones carry the avatar's scale)
         float3 ts = v.color.rgb * 2.0 - 1.0;
-        float3 bt = cross(v.normal, v.tangent.xyz) * v.tangent.w;
-        nOS = normalize(v.tangent.xyz * ts.x + bt * ts.y + v.normal * ts.z);
+        float3 n0 = normalize(v.normal), t0 = normalize(v.tangent.xyz + 1e-6);
+        float3 bt = cross(n0, t0) * v.tangent.w;
+        nOS = normalize(t0 * ts.x + bt * ts.y + n0 * ts.z);
     }
     else if (_OutlineNormalSource > 0.5) nOS = v.tangent.xyz;
     float3 nWS = LumiObjectToWorldNormal(nOS);
     float camDist = distance(posWS, LumiGetCameraPositionWS());
-    width *= lerp(1, min(camDist, _OutlineFixDistance), _OutlineFixWidth);   // keep screen width when far away
+    width *= lerp(1, min(camDist / sc, _OutlineFixDistance), _OutlineFixWidth);   // keep screen width when far away (distance at the avatar's scale)
     width *= lerp(1, clamp(1.7320508 / max(LumiProjScaleY(), 1e-3), 0.5, 2.0), _OutlineFOVCompensate);   // same look at any FOV
     float3 basePosWS = posWS;
     posWS += nWS * width;
     float3 toCam = normalize(LumiGetCameraPositionWS() - posWS);
-    posWS -= toCam * zBiasCm * 0.01;
+    posWS -= toCam * zBiasCm * 0.01 * sc;
     o.posWS = posWS;
     o.pos = LumiPerspectiveRemoval(UnityWorldToClipPos(posWS));
     if (width <= 0 || LumiHidden(v)) o.pos = LUMI_NAN4; // degenerate: no outline
@@ -529,18 +807,29 @@ float4 LumiOutlineColor(v2fOutline i, float4 color, float mainBlend, float light
     col.a = cutA;
     return col;
 }
+// standalone AudioLink on the outline (a uniform branch: no keyword in the outline passes)
+float3 LumiALOutline(float2 uv)
+{
+    float3 g = 0;
+    [branch] if (_UseALSolo > 0.5 && _ALOutline > 0.001) g = LumiALSoloGlow(uv) * _ALOutline;
+    return g;
+}
 float4 fragOutline(v2fOutline i) : SV_Target
 {
     UNITY_SETUP_INSTANCE_ID(i);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
     float2 uv = i.uv0 * _MainTex_ST.xy + _MainTex_ST.zw;
-    return LumiOutlineColor(i, _OutlineColor * LUMI_SAMPLE(_OutlineTex, LUMI_TF(_OutlineTex, uv)), _OutlineMainBlend, _OutlineEnableLighting, true);
+    float4 col = LumiOutlineColor(i, _OutlineColor * LUMI_SAMPLE(_OutlineTex, LUMI_TF(_OutlineTex, uv)), _OutlineMainBlend, _OutlineEnableLighting, true);
+    col.rgb += LumiALOutline(i.uv0);
+    return col;
 }
 float4 fragOutline2(v2fOutline i) : SV_Target
 {
     UNITY_SETUP_INSTANCE_ID(i);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
-    return LumiOutlineColor(i, _Outline2Color, _Outline2MainBlend, _Outline2EnableLighting, false);
+    float4 col = LumiOutlineColor(i, _Outline2Color, _Outline2MainBlend, _Outline2EnableLighting, false);
+    col.rgb += LumiALOutline(i.uv0);
+    return col;
 }
 
 // ---------------------------------------------------------------------------
@@ -570,11 +859,12 @@ v2fShadow vertShadow(appdata v)
         float3 L = normalize(UnityWorldSpaceLightDir(posWS));
         float shadowCos = dot(nWS, L);
         float shadowSine = sqrt(1 - shadowCos * shadowCos);
-        posWS -= nWS * (_ShadowCasterNormalBias * 0.01 * shadowSine);
+        float sc = LumiVertexScale(v.normal);   // (the biases in cm at the avatar's scale)
+        posWS -= nWS * (_ShadowCasterNormalBias * 0.01 * sc * shadowSine);
         // push the caster away from the light: small shapes (nose, bangs, folds) stop shadowing the avatar itself,
         // which also removes most of the frame to frame shimmer of those small shadows. Stronger when the light
         // comes from the camera side (front light: self shadows there look the most wrong), none from behind.
-        float bias = _ShadowCasterBias * 0.01;
+        float bias = _ShadowCasterBias * 0.01 * sc;
         float facing = saturate(dot(L, normalize(_WorldSpaceCameraPos - posWS)) * 2.0 + 1.0);
         bias *= lerp(1.0, facing, _ShadowCasterBiasView);
     #if defined(SHADOWS_DEPTH)

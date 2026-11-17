@@ -62,7 +62,12 @@ namespace MitToon.Editor
             ("_UseFillLight", "_LUMI_FILLLIGHT"), ("_UseGradient", "_LUMI_GRADIENT"), ("_UseHatch", "_LUMI_HATCH"),
             ("_UseAngelRing", "_LUMI_ANGELRING"), ("_UseHologram", "_LUMI_HOLOGRAM"), ("_CompatShading", "_LUMI_COMPAT"),
             ("_UseDepthShadow", "_LUMI_DEPTHSHADOW"), ("_UseInkLine", "_LUMI_INKLINE"), ("_UseFPSMode", "_LUMI_FPSMODE"),
+            ("_UseRayTrace", "_LUMI_RAYTRACE"), ("_URPShading", "_LUMI_URPSHADING"),
         };
+
+        public const string RayTraceShader = "MitToon/MitToon RayTrace";
+        public const int RayTraceQueue = 2499;   // after the world's opaque objects, still in the depth texture
+        public static bool IsRayTrace(Material m) => m != null && m.shader != null && m.shader.name == RayTraceShader;
 
         const string LightVolumesInclude = "Packages/red.sim.lightvolumes/Shaders/LightVolumes.cginc";
         static bool? lvInstalled;
@@ -535,6 +540,7 @@ namespace MitToon.Editor
 
             Category("影", "Shadows");
             DrawShadow();
+            DrawPCSS();
             DrawFace();
             DrawEyeGuard();
 
@@ -562,6 +568,7 @@ namespace MitToon.Editor
 
             Category("発光", "Emission");
             DrawEmission();
+            DrawAudioLink();
             DrawGlitter();
             DrawFlipbook();
 
@@ -1075,6 +1082,12 @@ namespace MitToon.Editor
             Sub("落ち影", "Cast Shadows");
             Prop("_ReceiveCastShadow");
             if (When(!compat)) Props("_ReceiveShadowStrength", "_CastShadowSoftness", "_CastShadowOnly");
+            if (compat && !Searching)
+                Info("lilToon 方式では、上の「1影で落ち影を受ける」「2影で落ち影を受ける」を上げると落ち影が出ます (lilToon と同じ)。接触影、SSAO、目の影除け、高品質な影もこの方式で使えます。",
+                     "In the lilToon model, raise \"1st / 2nd Receive Shadow\" above to show cast shadows (as in lilToon). Contact shadows, SSAO, the eye shadow guard and soft shadows (PCSS) work in this model too.", MessageType.None);
+            if (F("_URPShading") > 0.5f && !Searching)
+                Info("URP 方式では影の色は使われず、落ち影は物理ベースで暗くなります (強さは「落ち影を受ける」)。「トゥーン度」を上げると 1影の境界とぼかしで陰影が段になります (0 で URP と同じ)。接触影、SSAO、目の影除け、高品質な影もこの方式で使えます。",
+                     "In the URP model the shadow colours and borders are not used; cast shadows darken physically (strength: Receive Shadow). Contact shadows, SSAO, the eye shadow guard and soft shadows (PCSS) work in this model too.", MessageType.None);
             Sub("AO / マスク", "AO / Masks");
             if (When(!compat)) Prop("_ShadowAOShift");
             if (When(compat))
@@ -1115,19 +1128,30 @@ namespace MitToon.Editor
         {
             var p = P("_CompatShading");
             if (!Show(p)) return;
+            var pu = P("_URPShading");
             var label = new GUIContent(T("計算方式", "Shading Model"),
-                T("影、リム、マットキャップ、逆光で共通の切り替えです。lilToon は lilToon から移行したマテリアルの見た目をおおまかに再現し、その間は MitToon 独自の陰影や質感の機能は使われません。",
-                  "One switch shared by shadow, rim, matcap and backlight. lilToon roughly reproduces the look of a material migrated from lilToon; MitToon's own shading and material features are skipped while it is on."));
-            var opts = new[] { new GUIContent("MitToon"), new GUIContent("lilToon") };
-            EditorGUI.showMixedValue = p.hasMixedValue;
+                T("影、リム、マットキャップ、逆光、ライティングで共通の切り替えです。lilToon は lilToon から移行したマテリアルの見た目をおおまかに再現します。URP は Universal Render Pipeline の Lit シェーダーと同じ物理ベースのライティング (ランバート + GGX、ライトプローブと反射プローブ) です。lilToon / URP の間は MitToon 独自の陰影や質感の機能は使われません (リムライト、オフセットリムライト、トゥーン度はどの方式でも働きます)。",
+                  "One switch shared by shadow, rim, matcap, backlight and lighting. lilToon roughly reproduces the look of a material migrated from lilToon. URP is the physically based lighting of the Universal Render Pipeline's Lit shader (lambert + GGX, light probes and the reflection probe). MitToon's own shading and material features are skipped in lilToon / URP."));
+            var opts = new[] { new GUIContent("MitToon"), new GUIContent("lilToon"), new GUIContent(T("URP (物理ベース)", "URP (physically based)")) };
+            int cur = pu != null && pu.floatValue > 0.5f ? 2 : (p.floatValue > 0.5f ? 1 : 0);
+            EditorGUI.showMixedValue = p.hasMixedValue || (pu != null && pu.hasMixedValue);
             EditorGUI.BeginChangeCheck();
-            int v = EditorGUILayout.Popup(label, p.floatValue > 0.5f ? 1 : 0, opts);
+            int v = EditorGUILayout.Popup(label, cur, opts);
             EditorGUI.showMixedValue = false;
             if (EditorGUI.EndChangeCheck())
             {
-                p.floatValue = v;
+                p.floatValue = v == 1 ? 1 : 0;
+                if (pu != null) pu.floatValue = v == 2 ? 1 : 0;
                 foreach (var t in me.targets) SyncKeywords((Material)t);
             }
+            var pr = P("_UseRayTrace");
+            bool rtOn = pu != null && pu.floatValue > 0.5f && pr != null && pr.floatValue > 0.5f;
+            if (rtOn)
+                Info("URP と同じ物理ベースの光に、疑似レイトレーシングの光線を組み合わせています。ライトプローブの光から空の主な向きの光を取り出して光線で影を落とし (ディレクショナルライトの無いワールドでも影が出ます)、ポイントライト・スポットライトにも光線の影が付きます。RayTrace シェーダーでは映り込みと照り返しも加わります。設定は「疑似レイトレーシング」にあります。",
+                     "URP's physically based light combined with the pseudo ray tracing. The main direction of the sky is taken out of the light probes and shadowed by rays (shadows even in worlds without a directional light), and point / spot lights get ray traced shadows too. The RayTrace shader adds reflections and colour bounce. Settings are in Pseudo Ray Tracing.", MessageType.None);
+            else if (pu != null && pu.floatValue > 0.5f)
+                Info("URP の Lit シェーダーと同じ計算で光を受けます。使われるのはベースカラー、ノーマルマップ、メタリック、スムースネス、AO、発光です (トゥーンの影、ライトの明るさ制限、MitToon GI は使われません)。",
+                     "Lit like the URP Lit shader. Uses base colour, normal map, metallic, smoothness, AO and emission (no toon shadow, light limits or MitToon GI).", MessageType.None);
             EditorGUILayout.Space(2);
         }
 
@@ -1148,6 +1172,7 @@ namespace MitToon.Editor
         void DrawLighting()
         {
             if (!Module("lighting", "ライティング", "Lighting")) return;
+            ModeRow();
             Props("_LightMinLimit", "_LightMaxLimit", "_LightSoftLimit", "_LightBoost", "_MonochromeLighting", "_AsUnlit", "_VertexLightStrength", "_AddLightStrength");
             Sub("追加ライト (ポイント / スポット)", "Additional Lights (point / spot)");
             Props("_AddLightSoftness", "_AddLightCastShadow", "_AddLightMaxLimit", "_AddLightPassthrough", "_AddLightMonochrome", "_AddLightSmoothFalloff", "_AddLightIgnoreDirectional");
@@ -1159,6 +1184,13 @@ namespace MitToon.Editor
             Props("_EnvColorStrength", "_LightColorStrength", "_DarkColorReduce", "_DarkColorThreshold");
             Info("ライトプローブ、反射プローブ (景色)、近くのポイントライト、平行光源を解析して、光の方向・キーライトと環境光の配分・色を自動で決めます。環境光が強すぎて平坦なワールドでは一部をキーライトに回して立体感を出します。暗い場所では環境の色をほぼ無彩色にします。",
                  "Analyses light probes, the reflection probe (scenery), nearby point lights and the directional light to pick the light direction, the key / ambient balance and the color. In flat worlds part of the ambient becomes a key light. In the dark the ambient color is almost neutral.", MessageType.None);
+            if (When(!Compat && F("_URPShading") < 0.5f))
+            {
+                Sub("URP の良い所を取り入れる", "Take the Good Parts of URP");
+                Props("_URPMixDiffuse", "_URPMixSpecular");
+                Info("トゥーンの影や MitToon の明るさ制限はそのままに、URP の光の受け方を混ぜます。陰影: 光の向きに沿ったなめらかな陰影と、法線方向の環境光による影の中の立体感。ハイライトと映り込み: URP の GGX ハイライトと、縁ほど強くなる映り込み (フレネル)。",
+                     "Mixes URP's way of receiving light while keeping the toon shadow and MitToon's light limits. Shading: smooth shading along the light and volume inside the shadow from ambient along the normal. Highlights and reflections: URP's GGX highlight and reflections that grow at the edges (fresnel).", MessageType.None);
+            }
             Sub("ライトの計算方式", "Light Model");
             Props("_LightColorMode", "_LightMapMode");
             if (When(Mathf.RoundToInt(F("_LightColorMode")) == 2)) Prop("_UnlitIntensity");
@@ -1227,6 +1259,7 @@ namespace MitToon.Editor
         void DrawScreenSpace()
         {
             if (!Module("ss", "スクリーンスペース (SSAO / 落ち影)", "Screen Space (SSAO / Shadows)", null, false, true)) return;
+            Prop("_NoiseBlur");     // spreads the sample origins over a disk: a real blur of AO / shadows at no extra cost   // 2x2 average of the dots of SSAO / contact / soft / PCSS / ray traced shadows
             if (Module("ssao", "SSAO (アンビエントオクルージョン)", "SSAO", "_UseSSAO", true))
             {
                 SSAODebugButton();
@@ -1276,10 +1309,181 @@ namespace MitToon.Editor
                 Props("_ContactShadowJitter");
                 EndModule();
             }
+            DrawRayTrace();
             EndModule();
         }
 
+        void DrawRayTrace()
+        {
+            if (!Module("raytrace", "疑似レイトレーシング", "Pseudo Ray Tracing", "_UseRayTrace", true)) return;
+            var mats = me.targets.Cast<Material>().ToArray();
+            bool grab = mats.All(IsRayTrace);
+            if (!collecting && !Searching)
+            {
+                Info("深度テクスチャの上で光線を進めて、当たった所を調べます。影は光源の大きさに合わせてやわらかくなり、AO は物の隙間を暗くします。映り込みと色の照り返しは「MitToon RayTrace」シェーダーで使えます (面を描いた後に画面の色を読む GrabPass を使うため別のシェーダーです。マテリアルごとに画面をコピーするので、使う部位を絞ると軽くなります)。画面の外、物の裏側、後から描かれる物は映りません。",
+                     "Rays are marched through the depth texture. Shadows soften with the light size and the AO darkens gaps. Reflections and colour bounce need the \"MitToon RayTrace\" shader (it grabs the screen after drawing the surface, once per material, so use it only where needed). Things off screen, hidden behind others or drawn later are not reflected.", MessageType.None);
+                if (!grab && GUILayout.Button(T("RayTrace シェーダーに切り替える (映り込み・照り返しを使う)", "Switch to the RayTrace shader (reflections / colour bounce)")))
+                    SwitchRayTrace(mats, true);
+                if (grab && GUILayout.Button(T("通常の MitToon シェーダーに戻す", "Back to the normal MitToon shader")))
+                    SwitchRayTrace(mats, false);
+            }
+            if (When(F("_URPShading") > 0.5f))
+            {
+                Sub("URP ライティングとの組み合わせ", "With the URP Lighting");
+                Prop("_RTSkyLight");
+            }
+            Sub("光線追跡の影", "Ray Traced Shadows");
+            Props("_RTShadowStrength", "_RTShadowLength", "_RTShadowSoftness", "_RTShadowRays", "_RTShadowSteps", "_RTShadowThickness", "_RTShadowBias");
+            Sub("光線追跡 AO", "Ray Traced AO");
+            Props("_RTAOStrength", "_RTAORadius", "_RTAORays", "_RTAOSteps", "_RTAOThickness", "_RTAOMultiBounce");
+            // always listed (so they can be found); greyed out until the material uses the RayTrace shader
+            Sub("照り返し・光る物からの光 (GI)", "Bounce Light / Light from Glowing Things (GI)");
+            if (!grab && !collecting && !Searching)
+                Info("照り返し・光る物からの光・映り込みは「MitToon RayTrace」シェーダーでだけ働きます。上のボタンで切り替えると使えるようになります。",
+                     "Bounce light, light from glowing things and reflections work only with the \"MitToon RayTrace\" shader. Switch with the button above to use them.", MessageType.None);
+            using (new EditorGUI.DisabledScope(!grab && !collecting && !Searching))
+            {
+                Props("_RTGIStrength", "_RTGIRays", "_RTGILength", "_RTGISpecular", "_RTGIMaxBright");
+                Sub("映り込み (SSR)", "Reflections (SSR)");
+                Props("_RTReflStrength", "_RTReflLength", "_RTReflSteps", "_RTReflThickness", "_RTReflRoughCut");
+            }
+            Sub("距離", "Distance");
+            Prop("_RTMaxDistance");
+            EndModule();
+        }
+
+        static void SwitchRayTrace(Material[] mats, bool toRT)
+        {
+            var sh = Shader.Find(toRT ? RayTraceShader : "MitToon/MitToon");
+            if (sh == null) return;
+            Undo.RecordObjects(mats, "MitToon RayTrace Shader");
+            foreach (var m in mats)
+            {
+                int mode = m.HasProperty("_RenderMode") ? Mathf.RoundToInt(m.GetFloat("_RenderMode")) : 0;
+                m.shader = sh;
+                if (mode <= 1) m.renderQueue = toRT ? (mode == 0 ? -1 : RayTraceQueue) : (mode == 0 ? -1 : (int)RenderQueue.AlphaTest);
+                if (toRT) m.SetFloat("_UseRayTrace", 1);
+                SyncKeywords(m);
+                EditorUtility.SetDirty(m);
+            }
+        }
+
         // depth effects need _CameraDepthTexture: only rendered while a shadowed directional light exists (same as Poiyomi's DepthGet)
+        void DrawPCSS()
+        {
+            if (!collecting && !Searching)
+            {
+                var tm = me.targets.Cast<Material>().ToArray();
+                if (tm.Any(m => m.HasProperty("_UsePCSS") && m.GetFloat("_UsePCSS") < 0.5f && MitToonShadowLight.HasShadowLight(m)))
+                {
+                    Info("このアバターには影ライトがありますが、このマテリアルは「高品質な影」がオフなので影ライトの影が出ません。",
+                         "This avatar has a Shadow Light, but Soft Shadows is off in this material, so the Shadow Light casts no shadow here.", MessageType.Warning);
+                    if (GUILayout.Button(T("アバターの全マテリアルで高品質な影をオンにする", "Turn Soft Shadows on in all materials of the avatar")))
+                        MitToonShadowLight.EnablePCSSOnAvatars(tm);
+                }
+            }
+            if (!Module("pcss", "高品質な影 (PCSS)", "Soft Shadows (PCSS)", "_UsePCSS")) return;
+            if (!collecting && !Searching)
+            {
+                bool blocked = me.targets.Cast<Material>().Any(m => !ShadowLightBlend(m));
+                if (blocked)
+                    Info("半透明、または Alpha To Coverage のカットアウトでは影ライトの影は出ません (影付きスポットライトの柔らかい影は出ます)。",
+                         "Transparent materials and cutout with Alpha To Coverage show no Shadow Light shadow (soft shadows of shadowed spot lights still work).", MessageType.Warning);
+                if (GUILayout.Button(T("このマテリアルのアバターに影ライトを追加", "Add Shadow Light to avatars using this material")))
+                    MitToonShadowLight.AddForMaterials(me.targets.Cast<Material>().ToArray());
+            }
+            Sub("基本", "Basics");
+            Props("_PCSSShadowStrength", "_PCSSShading");
+            Sub("落ち影の形", "Cast Shadow Shape");
+            Props("_PCSSBorder", "_PCSSToon", "_PCSSLightSize", "_PCSSMinBlur", "_PCSSMaxBlur");
+            Sub("陰影 (光の裏側)", "Shading (faces turned away)");
+            Props("_PCSSShadingBorder", "_PCSSShadingBlur", "_PCSSNormalStrength");
+            Sub("影の色", "Shadow Colour");
+            Props("_PCSSShadowKeep", "_PCSSShadowColor", "_PCSSShadowColorStrength", "_PCSSAutoColor");
+            Sub("影の境界の色", "Shadow Border Colour");
+            Props("_PCSSBorderColor", "_PCSSBorderWidth");
+            Sub("品質", "Quality");
+            Props("_PCSSSamples", "_PCSSJitter", "_PCSSTexelFilter", "_PCSSSearchScale", "_PCSSReceiverBias");
+            Sub("範囲", "Range");
+            Tex("_PCSSReceiveMask");
+            Prop("_PCSSDistanceFade");
+            Sub("ワールドの光から推測", "From the World's Light");
+            if (!collecting && !Searching)
+                Info("影ライトはアバターに付いているので、ワールドの光の向きには動けません。オンにすると、ワールドの光 (ディレクショナルライト、ライトプローブ、反射プローブ、近くのポイントライト) の向きを毎フレーム推測し、その向きの陰影と落ち影 (深度テクスチャの光線) を出します。影ライトは落ち影だけを担当します。",
+                     "The shadow light is attached to the avatar, so it cannot turn to the world's light. When on, the direction of the world's light (directional light, light probes, reflection probe, nearby point lights) is estimated every frame and shading and a cast shadow (rays through the depth texture) follow it; the shadow light only adds its cast shadow.", MessageType.None);
+            Prop("_PCSSWorldLight");
+            if (When(F("_PCSSWorldLight") > 0.5))
+                Props("_PCSSWorldShadowStrength", "_PCSSWorldShadowLength", "_PCSSWorldShadowSoftness");
+            if (!collecting && !Searching) DrawShadowLightFollow();
+            EndModule();
+        }
+
+        // follow / placement of the shadow light (a scene object, not a material setting): read once per material selection
+        static int slFor;
+        static MitToonShadowLight.Follow slFollow;
+        static MitToonShadowLight.Aim slAim;
+        static float slDist = 2f, slAngle = 45f;
+        static bool slLock;
+        void DrawShadowLightFollow()
+        {
+            Sub("影ライトの追従と位置", "Shadow Light Follow & Position");
+            var mats = me.targets.Cast<Material>().ToArray();
+            int id = mats[0].GetInstanceID();
+            if (slFor != id)
+            {
+                slFor = id;
+                var l = MitToonShadowLight.LightsFor(mats).FirstOrDefault();
+                if (l != null) { slFollow = MitToonShadowLight.CurrentFollow(l); slAngle = l.spotAngle; slLock = MitToonShadowLight.CurrentLock(l); slDist = MitToonShadowLight.CurrentDistance(l); }
+            }
+            slFollow = (MitToonShadowLight.Follow)EditorGUILayout.Popup(T("追従先", "Follow"), (int)slFollow, JP ? MitToonShadowLight.FollowJP : MitToonShadowLight.FollowEN);
+            slAim = (MitToonShadowLight.Aim)EditorGUILayout.Popup(T("光の位置", "Light Position"), (int)slAim, JP ? MitToonShadowLight.AimJP : MitToonShadowLight.AimEN);
+            slDist = EditorGUILayout.Slider(T("頭からの距離 (m)", "Distance from Head (m)"), slDist, 0.4f, 5f);
+            slAngle = EditorGUILayout.Slider(new GUIContent(T("照らす範囲 (角度)", "Cone Angle"), T("狭く遠いほど影が細かくなります (影マップがアバターに集中する)。", "Narrower and farther gives finer shadows (the shadow map covers the avatar only).")), slAngle, 20f, 120f);
+            slLock = EditorGUILayout.Toggle(new GUIContent(T("回転を固定 (光の向きをワールドに固定)", "Lock Rotation (fixed light direction in the world)"),
+                T("位置は追従先に付いていき、光の向きはアバターを読み込んだ時の向きのまま変わりません。", "The light moves with the followed part, but keeps the direction it had when the avatar loaded.")), slLock);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button(T("影ライトに適用", "Apply to Shadow Light")))
+                    MitToonShadowLight.PlaceForMaterials(mats, slFollow, slAim, slDist, slAngle, slLock);
+                if (GUILayout.Button(T("影ライトを選択", "Select Shadow Light")))
+                    MitToonShadowLight.SelectForMaterials(mats);
+            }
+
+            // shadow map settings of the light itself, applied at once
+            Sub("影ライトの影の設定 (ライト側)", "Shadow Light Shadow Map (on the light)");
+            if (slLights == null || slLightsFor != id || slLights.Any(x => x == null)) { slLightsFor = id; slLights = MitToonShadowLight.LightsFor(mats); }
+            if (slLights.Length == 0) { EditorGUILayout.LabelField(T("影ライトがありません", "No Shadow Light")); return; }
+            var l0 = slLights[0];
+            EditorGUI.BeginChangeCheck();
+            float bias = EditorGUILayout.Slider(new GUIContent(T("影のバイアス", "Shadow Bias"), T("小さいほど近い影 (前髪から顔など) が出ます。大きくすると影が消えます。", "Smaller shows close shadows (bangs on the face). Larger removes them.")), l0.shadowBias, 0f, 0.05f);
+            float nbias = EditorGUILayout.Slider(new GUIContent(T("ノーマルバイアス", "Normal Bias"), T("自己影のノイズが出る時に少し上げます。", "Raise a little when self shadows get noisy.")), l0.shadowNormalBias, 0f, 1f);
+            var res = (UnityEngine.Rendering.LightShadowResolution)EditorGUILayout.Popup(T("影の解像度 (品質設定)", "Shadow Resolution (quality)"), Mathf.Max(0, (int)l0.shadowResolution),
+                JP ? new[] { "低", "中", "高", "最高" } : new[] { "Low", "Medium", "High", "Very High" });
+            int[] customs = { 0, 1024, 2048, 4096, 8192 };
+            int ci = System.Array.IndexOf(customs, l0.shadowCustomResolution); if (ci < 0) ci = 0;
+            ci = EditorGUILayout.Popup(new GUIContent(T("影の解像度 (固定)", "Shadow Resolution (fixed)"), T("画面の大きさで解像度が変わらないよう固定します。大きいほど細かく、重くなります (VRAM: 2048=16MB、4096=64MB、8192=256MB)。", "Fixes the size so it does not change with the screen. Larger is finer and heavier (VRAM: 2048 = 16 MB, 4096 = 64 MB, 8192 = 256 MB).")), ci,
+                JP ? new[] { "自動 (品質設定)", "1024", "2048", "4096", "8192" } : new[] { "Auto (quality)", "1024", "2048", "4096", "8192" });
+            int custom = customs[ci];
+            float near = EditorGUILayout.Slider(new GUIContent(T("ニアプレーン", "Near Plane"), T("ライトのすぐ近くの物が影を落とさない距離です。", "Objects closer to the light than this cast no shadow.")), l0.shadowNearPlane, 0.05f, 1f);
+            float range = EditorGUILayout.Slider(T("ライトの届く距離 (m)", "Light Range (m)"), l0.range, 1f, 20f);
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObjects(slLights, "MitToon Shadow Light Settings");
+                foreach (var x in slLights) { x.shadowBias = bias; x.shadowNormalBias = nbias; x.shadowResolution = res; x.shadowCustomResolution = custom; x.shadowNearPlane = near; x.range = range; EditorUtility.SetDirty(x); }
+            }
+        }
+        static Light[] slLights;
+        static int slLightsFor;
+
+        // the shadow light darkens through Blend One SrcAlpha in ForwardAdd: opaque, or cutout without Alpha To Coverage
+        public static bool ShadowLightBlend(Material m)
+        {
+            if (!m.HasProperty("_RenderMode")) return false;
+            int mode = Mathf.RoundToInt(m.GetFloat("_RenderMode"));
+            if (mode == 0) return true;
+            return mode == 1 && !(m.HasProperty("_AlphaToMask") && m.GetFloat("_AlphaToMask") > 0.5f);
+        }
+
         void DrawDepthLight()
         {
             if (!Module("depthlight", "深度ライト (このグループの効果をどのワールドでも使う)", "Depth Light (use this group in every world)")) return;
@@ -1348,6 +1552,10 @@ namespace MitToon.Editor
             if (F("_PerspectiveRemoval") > 0.001f)
                 Info("VR と VR のミラーでは自動で無効になります (両目の立体感と合わないため)。デスクトップ視点、カメラ、デスクトップのミラーで効きます。",
                      "Turned off automatically in VR and VR mirrors (it conflicts with stereo depth). Works in desktop view, cameras and desktop mirrors.", MessageType.None);
+            Sub("大きさ", "Scale");
+            Prop("_AvatarScaleFollow");
+            Info("輪郭線の太さ、深度リム、深度シャドウ、AO などの cm / m で決める長さを、アバターの拡大縮小に合わせます。VRChat のアバターの大きさ変更やメニューのプレビュー (縮小表示) でも見た目が変わりません。",
+                 "Lengths given in cm / m (outline width, depth rim, depth shadow, AO ...) follow the avatar's scale, so VRChat avatar scaling and the small menu preview keep the look.", MessageType.None);
             EndModule();
         }
 
@@ -1661,6 +1869,29 @@ namespace MitToon.Editor
                     EndModule();
                 }
             }
+            EndModule();
+        }
+
+        // standalone AudioLink: its own glow to the music, without the emission slots (outline too)
+        void DrawAudioLink()
+        {
+            if (!Module("audiolinksolo", "AudioLink (単体)", "AudioLink (standalone)", "_UseALSolo")) return;
+            Prop("_ALColor");
+            Tex("_ALMask");
+            Props("_ALBand", "_ALStrength", "_ALMin", "_ALMainBlend");
+            Sub("波", "Wave");
+            Prop("_ALWaveMode");
+            var wm = P("_ALWaveMode");
+            if (collecting || wm == null || wm.hasMixedValue || wm.floatValue > 0.5f) Prop("_ALWaveLength");
+            if (collecting || HasOutline((Material)me.target))
+            {
+                Sub("輪郭線", "Outline");
+                Prop("_ALOutline");
+            }
+            Sub("AudioLink が無いワールド", "Worlds Without AudioLink");
+            Prop("_ALNoSignal");
+            Info("音楽に合わせて光ります。発光1から4とは別に使えます。AudioLink が無いワールドでは「AudioLink が無いワールドでの明るさ」で光ります (0 で消えます)。",
+                 "Glows to the music, apart from emission 1 to 4. In worlds without AudioLink it glows at the 'Level Without AudioLink' (0 = off).", MessageType.None);
             EndModule();
         }
 
@@ -2119,6 +2350,13 @@ namespace MitToon.Editor
 
         public static void SyncKeywords(Material m)
         {
+            // RayTrace shader, opaque: the AO is handed to the composite pass through the alpha (see ApplyRenderMode)
+            if (m.HasProperty("_RTAlphaDst") && m.HasProperty("_RenderMode"))
+                m.SetFloat("_RTAlphaDst", Mathf.RoundToInt(m.GetFloat("_RenderMode")) == 0 ? (float)BlendMode.Zero : (float)BlendMode.OneMinusSrcAlpha);
+            // clean blur: the GrabPass ("Always") only runs while Blur is on (the RayTrace shader's own grabs are tagged
+            // ForwardBase and always run)
+            if (m.HasProperty("_NoiseBlur"))
+                m.SetShaderPassEnabled("Always", (m.GetFloat("_NoiseBlur") > 0.5f && !(m.HasProperty("_CompatShading") && m.GetFloat("_CompatShading") > 0.5f)));
             foreach (var (prop, kw) in KeywordMap)
             {
                 if (!m.HasProperty(prop)) continue;
@@ -2139,7 +2377,8 @@ namespace MitToon.Editor
             if (m.HasProperty("_UseEmission"))
             {
                 bool e1 = On("_UseEmission"), e2 = On("_UseEmission2"), e3 = On("_UseEmission3"), e4 = On("_UseEmission4");
-                bool al = (e1 && On("_UseAudioLink")) || (e2 && On("_Emission2AudioLink")) || (e3 && On("_Emission3AudioLink")) || (e4 && On("_Emission4AudioLink"));
+                bool al = (e1 && On("_UseAudioLink")) || (e2 && On("_Emission2AudioLink")) || (e3 && On("_Emission3AudioLink")) || (e4 && On("_Emission4AudioLink"))
+                          || On("_UseALSolo");
                 if (e1 || e2 || e3 || e4) m.EnableKeyword("_LUMI_EMISSION"); else m.DisableKeyword("_LUMI_EMISSION");
                 if (al) m.EnableKeyword("_LUMI_AUDIOLINK"); else m.DisableKeyword("_LUMI_AUDIOLINK");
             }
@@ -2159,7 +2398,7 @@ namespace MitToon.Editor
                     Set(m, BlendMode.One, BlendMode.Zero, BlendMode.One, BlendMode.One, 1, reset);
                     m.EnableKeyword("_ALPHATEST_ON");
                     m.SetOverrideTag("RenderType", "TransparentCutout");
-                    if (reset) m.renderQueue = (int)RenderQueue.AlphaTest;
+                    if (reset) m.renderQueue = IsRayTrace(m) ? RayTraceQueue : (int)RenderQueue.AlphaTest;
                     if (reset && m.HasProperty("_AlphaToMask")) m.SetFloat("_AlphaToMask", 1);   // anti-aliased cutout edge
                     break;
                 case 2:
@@ -2188,6 +2427,17 @@ namespace MitToon.Editor
                     m.SetOverrideTag("RenderType", "");
                     if (reset) m.renderQueue = -1;
                     break;
+            }
+            // RayTrace shader, opaque: the main pass hands its AO to the composite pass through the alpha (see
+            // LumiRTAOHandoff), which needs the alpha written as it is
+            if (m.HasProperty("_RTAlphaDst"))
+                m.SetFloat("_RTAlphaDst", mode == 0 ? (float)BlendMode.Zero : (float)BlendMode.OneMinusSrcAlpha);
+            // the shadow light multiplies what is drawn by the output alpha (plain lights write 1, so nothing changes)
+            if (ShadowLightBlend(m))
+            {
+                m.SetFloat("_DstBlendAdd", (float)BlendMode.SrcAlpha);
+                // the shadow light darkens by the blend factor: Max (lilToon's add pass, kept by the conversion) ignores it
+                if (m.HasProperty("_UsePCSS") && m.GetFloat("_UsePCSS") > 0.5f && m.HasProperty("_BlendOpAdd")) m.SetFloat("_BlendOpAdd", (float)BlendOp.Add);
             }
         }
 
