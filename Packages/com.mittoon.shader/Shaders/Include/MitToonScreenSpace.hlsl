@@ -881,13 +881,25 @@ static float lumiRTGIA2 = 0.5;
 static float4 lumiRTGIV0 = 0, lumiRTGIV1 = 0, lumiRTGIV2 = 0;   // the vertex probe, interpolated (set by the pass)
 // depth read with linear filtering (Unity's built in linear clamp sampler): between two texels the depth runs over
 // instead of stepping, so what is judged from it changes smoothly as the view moves (sampler from MitToonInput)
+// The four texels are read and blended here (one read, like the filtered one): a texel of the hidden area of a VR eye
+// (LumiDepthHidden) counts as the far plane, as the sky does, instead of pulling its neighbours toward the camera.
 float LumiSampleSceneEyeDepthSmooth(float2 uv)
 {
+    float2 sz = LumiDepthTexSize();
+    float2 p = uv * sz - 0.5, f = frac(p), gu = (floor(p) + 1.0) / sz;
 #if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
-    float raw = _CameraDepthTexture.SampleLevel(sampler_linear_clamp, float3(uv, unity_StereoEyeIndex), 0);
+    float4 g = _CameraDepthTexture.GatherRed(sampler_linear_clamp, float3(gu, unity_StereoEyeIndex));
 #else
-    float raw = _CameraDepthTexture.SampleLevel(sampler_linear_clamp, uv, 0);
+    float4 g = _CameraDepthTexture.GatherRed(sampler_linear_clamp, gu);
 #endif
+    float4 far4 = LumiDepthFarRaw();
+#if defined(UNITY_REVERSED_Z)
+    g = g >= 0.999999 ? far4 : g;
+#else
+    g = g <= 0.000001 ? far4 : g;
+#endif
+    // (gather order: x (0, 1), y (1, 1), z (1, 0), w (0, 0))
+    float raw = lerp(lerp(g.w, g.z, f.x), lerp(g.x, g.y, f.x), f.y);
     return LumiRawToEyeDepth(raw, uv);
 }
 void LumiRTGIVertex(float3 posWS, float3 N, out float4 o0, out float4 o1, out float4 o2)

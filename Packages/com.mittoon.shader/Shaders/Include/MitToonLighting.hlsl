@@ -626,15 +626,23 @@ void LumiRTSkySplit()
     float3 bl = float3(dot(Bx, lw), dot(By, lw), dot(Bz, lw));
     float bln = length(bl);
     lumiSkyDir = bln > 1e-6 ? bl / bln : float3(0, 1, 0);
-    float3 Bd = max(Bx * lumiSkyDir.x + By * lumiSkyDir.y + Bz * lumiSkyDir.z, 0.0);
-    // a light C from one direction is C (1/4 + n.d / 2) in the first two bands: C = 2 Bd, at most what keeps the
-    // rest positive everywhere (4 L0)
-    lumiSkyCol = min(2.0 * Bd, 4.0 * max(A, 0.0)) * _RTSkyLight;
+    // a light C from one direction is C (1/4 + n.d / 2) in the first two bands: C = 2 B along it, at most what keeps
+    // the rest positive everywhere (4 L0). Taken as luminance, in the colour of the probes' average: per channel the
+    // channels whose light comes from elsewhere (a warm floor below a green ceiling) dropped out of it, so the shadow
+    // took away only green and left purple.
+    float la = LumiLuminance(max(A, 0.0));
+    float sl = min(2.0 * bln, 4.0 * la) * _RTSkyLight;
+    lumiSkyCol = la > 1e-6 ? max(A, 0.0) * (sl / la) : 0.0;
 }
 float3 LumiRTSkySH(float3 N)
 {
     float NoS = dot(N, lumiSkyDir);
-    return max(LumiToonSH(N) - lumiSkyCol * (0.25 + 0.5 * NoS), 0.0) + lumiSkyCol * LumiToonNoL(NoS) * lumiSkyShadow;
+    // the probes without the sky's part, in the probes' own colour there (no channel clamped away), + the sky's part
+    // as a light the rays shadow
+    float3 sh = LumiToonSH(N);
+    float ls = LumiLuminance(sh);
+    float3 rest = ls > 1e-6 ? sh * saturate(1.0 - LumiLuminance(lumiSkyCol * (0.25 + 0.5 * NoS)) / ls) : 0.0;
+    return rest + lumiSkyCol * LumiToonNoL(NoS) * lumiSkyShadow;
 }
 float3 LumiURPShade(LumiSurface s, LumiInputData d, LumiLight ml, float3 aoIndirect, float3 aoDirect)
 {

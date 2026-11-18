@@ -297,8 +297,29 @@ bool LumiDepthTextureAvailable() { float2 s = LumiDepthTexSize(); return s.x > 1
 // Linear eye depth of a raw depth value at a screen UV. Mirrors use an oblique near plane, which changes the z row of
 // the projection and breaks the _ZBufferParams formula, so the depth is solved from the projection matrix itself:
 // view point (a d, b d, -d) with a, b from the screen position, and clip z / clip w = raw.
+// A raw depth right on the near plane: nothing real is there (it would be clipped). It is the hidden area of a VR eye
+// (the corners outside the lens, filled at the near plane before anything is drawn: no picture there). Read as nothing
+// (the sky / far plane), not as something touching the camera: the rays, AO, contact shadows and rims near the edge of
+// the view took it for a wall in front of the eye.
+bool LumiDepthHidden(float raw)
+{
+#if defined(UNITY_REVERSED_Z)
+    return raw >= 0.999999;
+#else
+    return raw <= 0.000001;
+#endif
+}
+float LumiDepthFarRaw()
+{
+#if defined(UNITY_REVERSED_Z)
+    return 0.0;
+#else
+    return 1.0;
+#endif
+}
 float LumiRawToEyeDepth(float raw, float2 uv)
 {
+    if (LumiDepthHidden(raw)) raw = LumiDepthFarRaw();
     float4x4 P = UNITY_MATRIX_P;
     if (P._m33 != 0.0 || (P._m20 == 0.0 && P._m21 == 0.0)) return LinearEyeDepth(raw);
     float2 ndc = float2(uv.x * 2.0 - 1.0, (uv.y * 2.0 - 1.0) * _ProjectionParams.x);
