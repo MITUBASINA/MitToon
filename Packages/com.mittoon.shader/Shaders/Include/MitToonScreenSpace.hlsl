@@ -865,6 +865,15 @@ float LumiRTNearAmount(float eyeDepth, float kpx)   // kpx: pixels per meter at 
 // pixels between the vertices blend smoothly (no grain). Only the light above what the probes already bring from that
 // side is added (ordinary surroundings do not wash the shading out). The probe also gives a "bounce light" (direction +
 // colour) for the highlight it puts on glossy parts.
+// the light found above what the probes already bring from that side: as much as the per channel excess, in the colour of
+// the light found. (The excess itself is the complement of a coloured ambient: grey surroundings under the green ambient
+// of a world with a green ceiling / carpet bounced purple.) A coloured source keeps its colour (red neon under a green
+// ambient: the excess is its red).
+float3 LumiRTAboveProbe(float3 found, float3 probe)
+{
+    float lf = LumiLuminance(found);
+    return lf > 1e-6 ? found * (LumiLuminance(max(found - probe, 0.0)) / lf) : 0.0;
+}
 static float3 lumiRTGIDir = 0, lumiRTGICol = 0;
 // how wide the bounce light comes in (GGX alpha^2 added to the highlight): light from all around makes a broad sheen,
 // one small glowing thing a tighter spot, never the pin point of a lamp (it is an area, not a point)
@@ -986,7 +995,7 @@ void LumiRTGIVertex(float3 posWS, float3 N, out float4 o0, out float4 o1, out fl
             T *= 1.0 - occ;
             if (T < 0.02) break;
         }
-        float3 L = max(Ld - (1.0 - T) * LumiSampleSH(dir), 0.0) * smoothstep(0.05, 0.25, cosN);
+        float3 L = LumiRTAboveProbe(Ld, (1.0 - T) * LumiSampleSH(dir)) * smoothstep(0.05, 0.25, cosN);
         a += L; br += L.r * dir; bg += L.g * dir; bb += L.b * dir;
     }
     // irradiance / pi toward a normal m: a + b.m (L0 + L1, clamped cosine), each ray standing for 4 pi / n of the sphere
@@ -1046,7 +1055,7 @@ float3 LumiRTGINear(float3 posWS, float3 N, float validity)
             float A = apx * B.a * mpp * mpp;   // its area (as the camera sees it)
             float w = (1.0 - smoothstep(0.6 * R, R, d)) * edge;
             float3 vW = mul(v, (float3x3)UNITY_MATRIX_V) / max(d, 1e-4);
-            float3 C = max(B.rgb / B.a - LumiSampleSH(vW), 0.0);
+            float3 C = LumiRTAboveProbe(B.rgb / B.a, LumiSampleSH(vW));
             E += C * (cr * A * w / (3.14159265 * max(d2, 4.0 * A + 1e-4)));
         }
     }
