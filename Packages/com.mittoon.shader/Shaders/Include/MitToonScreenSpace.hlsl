@@ -732,6 +732,21 @@ float3 LumiRTBright(float3 c)
     float l = max(c.r, max(c.g, c.b)), m = max(_RTGIMaxBright, 1.0);
     return l > 1.0 ? c * ((1.0 + (m - 1.0) * (1.0 - exp(-(l - 1.0) / (m - 1.0)))) / l) : c;
 }
+#if defined(LUMI_RAYTRACE_GRAB)
+// the grabbed colour at a UV (bilinear) for the bounce / reflections, a = 1; a = 0 (and no colour) where one of the four
+// pixels under the read belongs to an object of the same queue not drawn yet: its FX pass data is there (AO, contact
+// shadow, cast shadow as rgb: magenta in a contact shadow), not its colour
+float4 LumiRTGrabClean(float2 g)
+{
+#if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
+    float4 a4 = _GrabTexture.GatherAlpha(sampler_GrabTexture, float3(g, unity_StereoEyeIndex));
+#else
+    float4 a4 = _GrabTexture.GatherAlpha(sampler_GrabTexture, g);
+#endif
+    float clean = all(abs(a4 - LUMI_FX_MARK) >= 0.0008) ? 1.0 : 0.0;
+    return float4(LUMI_GRAB_SAMPLE(g) * clean, clean);
+}
+#endif
 #if defined(LUMI_RT_PYRAMID)
 // one level of the blurred screen at a screen UV (level k: 2^k pixels per texel): colour x coverage (rgb), coverage (a)
 // and coverage / depth (d), read from its two planes
@@ -762,7 +777,8 @@ LumiRTPyrSpan LumiRTPyrSpanOf(float lod)
 }
 float3 LumiRTPyrIn(LumiRTPyrSpan p, float2 uv, float depth)
 {
-    float3 sharp = LumiRTBright(LUMI_GRAB_SAMPLE(LumiGrabUV(uv)));
+    float4 sc = LumiRTGrabClean(LumiGrabUV(uv));
+    float3 sharp = LumiRTBright(sc.rgb);
     float d0, d1;
     float4 B0 = LumiRTPyrLevel(uv, p.lA, p.eye, d0);
     float4 B1 = LumiRTPyrLevel(uv, p.lB, p.eye, d1);
@@ -771,8 +787,9 @@ float3 LumiRTPyrIn(LumiRTPyrSpan p, float2 uv, float depth)
     float rel = abs(dm / max(B.a, 1e-4) * max(depth, 0.05) - 1.0);
     float w = p.fb * saturate(B.a * 4.0) * (1.0 - smoothstep(0.08, 0.25, rel));
     float3 blur = B.rgb / max(B.a, 1e-4);
+    w = sc.a > 0.5 ? w : saturate(B.a * 4.0);   // (no sharp colour there: the blurred one, which leaves such pixels out)
     float3 r = w >= 0.999 ? blur : lerp(sharp, blur, w);
-    return p.fb <= 0.001 ? sharp : r;
+    return p.fb <= 0.001 && sc.a > 0.5 ? sharp : r;
 }
 // the screen's light at a UV, averaged over about 2^lod pixels of the surfaces there (the sky left out), blended between
 // levels (below level 3: the sharp screen, blended into level 3 between 2 and 3). depth: of the surface the read is
@@ -812,8 +829,9 @@ float4 LumiRTPyrRaw(float2 uv, float lod, out float invz)
     [branch] if (fb < 0.999)
     {
         float z = LumiSampleSceneEyeDepth(uv);
-        float cov = saturate((_ProjectionParams.z * 0.95 - z) / (_ProjectionParams.z * 0.0475));
-        S = float4(LumiRTBright(LUMI_GRAB_SAMPLE(LumiGrabUV(uv))) * cov, cov);
+        float4 gc = LumiRTGrabClean(LumiGrabUV(uv));
+        float cov = saturate((_ProjectionParams.z * 0.95 - z) / (_ProjectionParams.z * 0.0475)) * gc.a;   // (not drawn yet: like the sky)
+        S = float4(LumiRTBright(gc.rgb) * cov, cov);
         si = cov / max(z, 0.05);
     }
     invz = si;
@@ -955,7 +973,7 @@ void LumiRTGIVertex(float3 posWS, float3 N, out float4 o0, out float4 o1, out fl
                 LumiRTPyrSpan sp = LumiRTPyrSpanOf(lodq);
                 [unroll] for (int q = 0; q < 13; q++) cs += oqs[q] * LumiRTPyrIn(sp, quvs[q], sds[q]);
             #else
-                [unroll] for (int q = 0; q < 13; q++) cs += oqs[q] * LumiRTBright(LUMI_GRAB_SAMPLE(LumiGrabUV(quvs[q])));
+                [unroll] for (int q = 0; q < 13; q++) cs += oqs[q] * LumiRTBright(LumiRTGrabClean(LumiGrabUV(quvs[q])).rgb);
             #endif
             }
             occ /= max(wsum, 1.0); cs /= max(wsum, 1.0);
@@ -1083,9 +1101,11 @@ float3 LumiRTReflection(float3 env, float3 posWS, float3 N, float3 V, float perc
     float hit = LumiRTMarchRefl(posWS + N * 0.01, dir, _RTReflLength, (int)clamp(_RTReflSteps, 8, 48), _RTReflThickness, noise, huv, ht);
     if (hit <= 0.001) return env;
     float2 g = LumiGrabUV(huv);
-    float4 sc4 = LUMI_GRAB_SAMPLE4(g);
-    // an object of the same queue not drawn yet: the data of its FX pass is there (marked in the alpha), not its colour
-    if (abs(sc4.a - LUMI_FX_MARK) < 0.0008) return env;
+    // an object of the same queue not drawn yet: the data of its FX pass is there (marked in the alpha), not its colour.
+    // Any of the four pixels of the bilinear read: at its edge a read half on it had a mixed alpha and passed as a colour
+    // (magenta glints in the eyes from a contact shadow there)
+    float4 sc4 = LumiRTGrabClean(g);
+    if (sc4.a < 0.5) return env;
     float3 sc = sc4.rgb;
     sc = LumiRTBright(sc);   // bright / glowing things stay bright in the reflection
     // glossy blur that grows with the distance to what is reflected (the cone of the rough reflection): sharp where
@@ -1107,8 +1127,9 @@ float3 LumiRTReflection(float3 env, float3 posWS, float3 N, float3 V, float perc
         {
             float ang = k * 1.0471976 + noise * 6.2831853;
             float rr = (k & 1) ? 1.0 : 0.55;
-            acc += LumiRTBright(LUMI_GRAB_SAMPLE(g + float2(cos(ang), sin(ang)) * bo * rr));
-            wsum += 1.0;
+            float4 ck = LumiRTGrabClean(g + float2(cos(ang), sin(ang)) * bo * rr);
+            acc += LumiRTBright(ck.rgb);
+            wsum += ck.a;
         }
         sc = acc / wsum;
     }
