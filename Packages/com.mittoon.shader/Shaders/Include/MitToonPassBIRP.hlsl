@@ -701,7 +701,7 @@ struct v2fOutline
     UNITY_VERTEX_OUTPUT_STEREO
 };
 
-v2fOutline LumiOutlineVertex(appdata v, float widthCm, float zBiasCm)
+v2fOutline LumiOutlineVertex(appdata v, float widthCm, float zBiasCm, float behind)
 {
     v2fOutline o;
     UNITY_INITIALIZE_OUTPUT(v2fOutline, o);
@@ -744,7 +744,9 @@ v2fOutline LumiOutlineVertex(appdata v, float widthCm, float zBiasCm)
     float3 basePosWS = posWS;
     posWS += nWS * width;
     float3 toCam = normalize(LumiGetCameraPositionWS() - posWS);
-    posWS -= toCam * zBiasCm * 0.01 * sc;
+    // behind: pushed away along the view ray by its own width (same place on screen). In hollows (eyes, between muscles,
+    // clothing folds) a wide shell's back faces come out in front of the surface: as deep as it is wide at most
+    posWS -= toCam * (zBiasCm * 0.01 * sc + width * behind);
     o.posWS = posWS;
     o.pos = LumiPerspectiveRemoval(UnityWorldToClipPos(posWS));
     if (width <= 0 || LumiHidden(v)) o.pos = LUMI_NAN4; // degenerate: no outline
@@ -771,10 +773,10 @@ v2fOutline LumiOutlineVertex(appdata v, float widthCm, float zBiasCm)
 #endif
     return o;
 }
-v2fOutline vertOutline(appdata v)  { return LumiOutlineVertex(v, _OutlineWidth, _OutlineZBias); }
+v2fOutline vertOutline(appdata v)  { return LumiOutlineVertex(v, _OutlineWidth, _OutlineZBias, 0.0); }
 // 2nd (outer) outline: drawn outside the 1st one (white + dark double line, glow edge ...)
 // "only outside the body" hides it with the stencil: the 1st outline's Z bias would only push it behind nearby objects (gaps), so only its own applies
-v2fOutline vertOutline2(appdata v) { return LumiOutlineVertex(v, _Outline2Width > 0 ? _OutlineWidth + _Outline2Width : 0, _OutlineZBias * (1.0 - _Outline2Silhouette) + _Outline2ZBias); }
+v2fOutline vertOutline2(appdata v) { return LumiOutlineVertex(v, _Outline2Width > 0 ? _OutlineWidth + _Outline2Width : 0, _OutlineZBias * (1.0 - _Outline2Silhouette) + _Outline2ZBias, 1.0); }
 
 float4 LumiOutlineColor(v2fOutline i, float4 color, float mainBlend, float lighting, bool highlight)
 {

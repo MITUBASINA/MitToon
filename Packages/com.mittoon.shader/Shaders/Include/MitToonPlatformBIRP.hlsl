@@ -317,9 +317,28 @@ float LumiDepthFarRaw()
     return 1.0;
 #endif
 }
+// VR: the rim of each eye's view, past what the lens shows. The hidden area there may not reach the depth texture (it
+// holds the scene's depth while the picture there was never drawn: black or whatever the eye texture held), so reads
+// there are left out by position: farther than 0.95 from the lens centre in clip space (corners, and the outer side,
+// where the off centre projection puts the most hidden area). The periphery is blurred by the lens anyway.
+bool LumiStereoOutside(float2 uv)
+{
+#if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+    #if defined(UNITY_SINGLE_PASS_STEREO)
+    float4 so = unity_StereoScaleOffset[unity_StereoEyeIndex];
+    uv = (uv - so.zw) / so.xy;
+    #endif
+    float2 ndc = float2(uv.x * 2.0 - 1.0, (uv.y * 2.0 - 1.0) * _ProjectionParams.x);
+    float2 c = -float2(UNITY_MATRIX_P._m02, UNITY_MATRIX_P._m12);   // where the view axis lands (off centre in VR)
+    float2 d = ndc - c;
+    return dot(d, d) > 0.95 * 0.95;
+#else
+    return false;
+#endif
+}
 float LumiRawToEyeDepth(float raw, float2 uv)
 {
-    if (LumiDepthHidden(raw)) raw = LumiDepthFarRaw();
+    if (LumiDepthHidden(raw) || LumiStereoOutside(uv)) raw = LumiDepthFarRaw();
     float4x4 P = UNITY_MATRIX_P;
     if (P._m33 != 0.0 || (P._m20 == 0.0 && P._m21 == 0.0)) return LinearEyeDepth(raw);
     float2 ndc = float2(uv.x * 2.0 - 1.0, (uv.y * 2.0 - 1.0) * _ProjectionParams.x);
