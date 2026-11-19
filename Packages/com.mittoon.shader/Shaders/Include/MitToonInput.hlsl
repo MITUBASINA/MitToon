@@ -242,6 +242,7 @@ CBUFFER_START(UnityPerMaterial)
     // standalone AudioLink (its own glow, outline too)
     float4 _ALColor, _ALMask_ST;
     float  _UseALSolo, _ALBand, _ALWaveMode, _ALWaveLength, _ALStrength, _ALMin, _ALMainBlend, _ALOutline, _ALNoSignal;
+    float  _ALEnvColor, _ALEnvSaturation, _ALRainbow, _ALRainbowSpeed, _ALRainbowScale, _ALRainbowMode;
 CBUFFER_END
 // set globally by the VRChat client (0 = normal view)
 float _VRChatMirrorMode;

@@ -211,10 +211,24 @@ float LumiALSoloLevel(float2 uv)
         v = _AudioTexture.Load(int3(x, (int)_ALBand, 0)).r;
     return lerp(_ALMin, 1.0, v);
 }
-// its glow (colour x mask x level x strength), for the surface and the outline
-float3 LumiALSoloGlow(float2 uv)
+// the hue of the place's light (main light + the probes' / light volumes' average), brightest channel 1: worlds
+// light mostly near white, so its saturation can be pushed. No light at all = white
+float3 LumiALEnvHue()
 {
-    return _ALColor.rgb * (_ALColor.a * _ALStrength * LUMI_SAMPLE(_ALMask, LUMI_TF(_ALMask, uv)).r * LumiALSoloLevel(uv));
+    float3 env = max(_LightColor0.rgb, 0) + LumiSampleSHAverage();
+    float mx = max(env.r, max(env.g, env.b));
+    if (mx < 1e-4) return 1.0;
+    float3 c = env / mx;
+    c = max(lerp(LumiLuminance(c).xxx, c, _ALEnvSaturation), 0);
+    return c / max(max(c.r, max(c.g, c.b)), 1e-4);
+}
+// its glow (colour x mask x level x strength), for the surface and the outline
+float3 LumiALSoloGlow(float2 uv, float3 posOS)
+{
+    float3 col = _ALColor.rgb;
+    [branch] if (_ALEnvColor > 0.001) col = lerp(col, col * LumiALEnvHue(), _ALEnvColor);
+    col = LumiEmissionRainbow(col, float4(_ALRainbow, _ALRainbowSpeed, _ALRainbowScale, _ALRainbowMode), frac(uv), posOS);
+    return col * (_ALColor.a * _ALStrength * LUMI_SAMPLE(_ALMask, LUMI_TF(_ALMask, uv)).r * LumiALSoloLevel(uv));
 }
 
 float3 LumiEmissionLayer(LumiInputData d, Texture2D map, Texture2D mask, float4 maskST, float4 st, float4 color, float uvCh, float4 scroll, float4 blink, float4 rb)
@@ -272,7 +286,7 @@ float3 LumiSampleEmission(LumiInputData d, LumiSurface s)
 #if defined(_LUMI_AUDIOLINK)
     // standalone AudioLink (works without the emission slots)
     [branch] if (_UseALSolo > 0.5)
-        e += LumiALSoloGlow(d.uv0) * lerp(1.0.xxx, s.albedo, _ALMainBlend);
+        e += LumiALSoloGlow(d.uv0, d.posOS) * lerp(1.0.xxx, s.albedo, _ALMainBlend);
 #endif
     return e;
 }

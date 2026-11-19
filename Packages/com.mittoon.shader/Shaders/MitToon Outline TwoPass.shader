@@ -297,7 +297,7 @@ Shader "MitToon/MitToon Outline TwoPass"
         _ContactShadowMask ("受ける側のマスク (R, 黒 = 影なし)|Receive Mask (R, black = none)", 2D) = "white" {}
         _ContactShadowMaskStrength ("マスクの強さ|Mask Strength", Range(0, 1)) = 1
         _NoiseBlur ("ぼかし (ピクセル, GrabPass)|Blur (pixels, GrabPass)", Range(0, 16)) = 0
-        [Toggle(_LUMI_RAYTRACE)] _UseRayTrace ("疑似レイトレーシング|Pseudo Ray Tracing", Float) = 0
+        [Toggle(_LUMI_RAYTRACE)] _UseRayTrace ("疑似レイトレーシング (非推奨)|Pseudo Ray Tracing (deprecated)", Float) = 0
         _RTShadowStrength ("光線追跡の影の強さ|Ray Traced Shadow Strength", Range(0, 1)) = 1
         _RTShadowLength ("影の光線の長さ (m)|Shadow Ray Length (m)", Range(0.05, 3)) = 0.6
         _RTShadowSoftness ("影のやわらかさ (光源の角度)|Shadow Softness (light angle)", Range(0, 15)) = 3
@@ -572,6 +572,12 @@ Shader "MitToon/MitToon Outline TwoPass"
         _ALMainBlend ("メインカラーの乗算|Multiply Main Color", Range(0, 1)) = 0
         _ALOutline ("輪郭線も光らせる|Outline Glow", Range(0, 1)) = 0
         _ALNoSignal ("AudioLink が無いワールドでの明るさ|Level Without AudioLink", Range(0, 1)) = 0
+        _ALEnvColor ("環境の光から色を作る|Color From Environment Light", Range(0, 1)) = 0
+        _ALEnvSaturation ("環境の光の色の鮮やかさ|Environment Color Saturation", Range(0, 4)) = 1.5
+        _ALRainbow ("レインボー|Rainbow", Range(0, 1)) = 0
+        _ALRainbowSpeed ("レインボーの速さ (周/秒)|Rainbow Speed (cycles/s)", Range(-5, 5)) = 0.5
+        _ALRainbowScale ("レインボーの繰り返し|Rainbow Repeats", Range(0, 10)) = 1
+        [Enum(Whole Surface,0,UV Horizontal,1,UV Vertical,2,Object Height,3,Rings from UV Centre,4)] _ALRainbowMode ("レインボーの流れ方|Rainbow Direction", Float) = 1
 
         // ---------- Dissolve / Fade ----------
         [Toggle(_LUMI_DISSOLVE)] _UseDissolve ("ディゾルブ|Dissolve", Float) = 0

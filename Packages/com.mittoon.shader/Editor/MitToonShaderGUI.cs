@@ -1315,14 +1315,16 @@ namespace MitToon.Editor
 
         void DrawRayTrace()
         {
-            if (!Module("raytrace", "疑似レイトレーシング", "Pseudo Ray Tracing", "_UseRayTrace", true)) return;
+            if (!Module("raytrace", "疑似レイトレーシング (非推奨)", "Pseudo Ray Tracing (deprecated)", "_UseRayTrace", true)) return;
             var mats = me.targets.Cast<Material>().ToArray();
             bool grab = mats.All(IsRayTrace);
             if (!collecting && !Searching)
             {
+                Info("非推奨の機能です。VR、一部のワールドやカメラで色や影がおかしくなることがあり、今後の修正や改良は行いません。新しく使うのはおすすめしません。影の付き方は「接触影」「SSAO」、光沢は反射プローブで代わりになります。",
+                     "Deprecated. It can show wrong colours or shadows in VR and in some worlds or cameras, and will not be fixed or improved further. Not recommended for new materials; contact shadows, SSAO and the reflection probe cover most of it.", MessageType.Warning);
                 Info("深度テクスチャの上で光線を進めて、当たった所を調べます。影は光源の大きさに合わせてやわらかくなり、AO は物の隙間を暗くします。映り込みと色の照り返しは「MitToon RayTrace」シェーダーで使えます (面を描いた後に画面の色を読む GrabPass を使うため別のシェーダーです。マテリアルごとに画面をコピーするので、使う部位を絞ると軽くなります)。画面の外、物の裏側、後から描かれる物は映りません。",
                      "Rays are marched through the depth texture. Shadows soften with the light size and the AO darkens gaps. Reflections and colour bounce need the \"MitToon RayTrace\" shader (it grabs the screen after drawing the surface, once per material, so use it only where needed). Things off screen, hidden behind others or drawn later are not reflected.", MessageType.None);
-                if (!grab && GUILayout.Button(T("RayTrace シェーダーに切り替える (映り込み・照り返しを使う)", "Switch to the RayTrace shader (reflections / colour bounce)")))
+                if (!grab && GUILayout.Button(T("RayTrace シェーダーに切り替える (非推奨)", "Switch to the RayTrace shader (deprecated)")))
                     SwitchRayTrace(mats, true);
                 if (grab && GUILayout.Button(T("通常の MitToon シェーダーに戻す", "Back to the normal MitToon shader")))
                     SwitchRayTrace(mats, false);
@@ -1571,8 +1573,7 @@ namespace MitToon.Editor
             }
             if (Module("backlight", "逆光ライト", "Backlight", "_UseBacklight"))
             {
-                ModeRow();
-                Tex("_BacklightMask", "_BacklightColor");
+                ModeRow();                Tex("_BacklightMask", "_BacklightColor");
                 Props("_BacklightBorder", "_BacklightBlur", "_BacklightDirectivity", "_BacklightViewStrength", "_BacklightNormalStrength", "_BacklightMainStrength");
                 if (When(Compat)) Props("_BacklightReceiveShadow", "_BacklightBackfaceMask");
                 EndModule();
@@ -1784,8 +1785,7 @@ namespace MitToon.Editor
         void DrawOffsetRim()
         {
             if (Module("offsetrim", "オフセットリムライト", "Offset Rim Light", "_UseOffsetRim"))
-            {
-                Props("_OffsetRimColor", "_OffsetRimStrength", "_OffsetRimDirMode");
+            {                Props("_OffsetRimColor", "_OffsetRimStrength", "_OffsetRimDirMode");
                 if (When(F("_OffsetRimDirMode") > 1.5f && F("_OffsetRimDirMode") < 2.5f))
                     Vec("_OffsetRimVector", new[] { "X", "Y" }, new[] { -1f, -1f }, new[] { 1f, 1f });
                 Props("_OffsetRimWidth", "_OffsetRimMaxPx", "_OffsetRimThreshold", "_OffsetRimSoftness", "_OffsetRimFacing",
@@ -1879,6 +1879,11 @@ namespace MitToon.Editor
             Prop("_ALColor");
             Tex("_ALMask");
             Props("_ALBand", "_ALStrength", "_ALMin", "_ALMainBlend");
+            Sub("色", "Color");
+            Prop("_ALEnvColor");
+            var ec = P("_ALEnvColor");
+            if (collecting || ec == null || ec.hasMixedValue || ec.floatValue > 0.001f) Prop("_ALEnvSaturation");
+            Rainbow("_AL");
             Sub("波", "Wave");
             Prop("_ALWaveMode");
             var wm = P("_ALWaveMode");
@@ -1890,8 +1895,8 @@ namespace MitToon.Editor
             }
             Sub("AudioLink が無いワールド", "Worlds Without AudioLink");
             Prop("_ALNoSignal");
-            Info("音楽に合わせて光ります。発光1から4とは別に使えます。AudioLink が無いワールドでは「AudioLink が無いワールドでの明るさ」で光ります (0 で消えます)。",
-                 "Glows to the music, apart from emission 1 to 4. In worlds without AudioLink it glows at the 'Level Without AudioLink' (0 = off).", MessageType.None);
+            Info("音楽に合わせて光ります。発光1から4とは別に使えます。AudioLink が無いワールドでは「AudioLink が無いワールドでの明るさ」で光ります (0 で消えます)。「環境の光から色を作る」はワールドのライトと環境光の色合いを発光色に掛け、「レインボー」は色を虹色に流します。",
+                 "Glows to the music, apart from emission 1 to 4. In worlds without AudioLink it glows at the 'Level Without AudioLink' (0 = off). 'Color From Environment Light' tints the glow with the hue of the world's light and ambient, 'Rainbow' cycles it through the rainbow.", MessageType.None);
             EndModule();
         }
 

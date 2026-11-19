@@ -810,10 +810,10 @@ float4 LumiOutlineColor(v2fOutline i, float4 color, float mainBlend, float light
     return col;
 }
 // standalone AudioLink on the outline (a uniform branch: no keyword in the outline passes)
-float3 LumiALOutline(float2 uv)
+float3 LumiALOutline(float2 uv, float3 posWS)
 {
     float3 g = 0;
-    [branch] if (_UseALSolo > 0.5 && _ALOutline > 0.001) g = LumiALSoloGlow(uv) * _ALOutline;
+    [branch] if (_UseALSolo > 0.5 && _ALOutline > 0.001) g = LumiALSoloGlow(uv, mul(unity_WorldToObject, float4(posWS, 1)).xyz) * _ALOutline;
     return g;
 }
 float4 fragOutline(v2fOutline i) : SV_Target
@@ -822,7 +822,7 @@ float4 fragOutline(v2fOutline i) : SV_Target
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
     float2 uv = i.uv0 * _MainTex_ST.xy + _MainTex_ST.zw;
     float4 col = LumiOutlineColor(i, _OutlineColor * LUMI_SAMPLE(_OutlineTex, LUMI_TF(_OutlineTex, uv)), _OutlineMainBlend, _OutlineEnableLighting, true);
-    col.rgb += LumiALOutline(i.uv0);
+    col.rgb += LumiALOutline(i.uv0, i.posWS);
     return col;
 }
 float4 fragOutline2(v2fOutline i) : SV_Target
@@ -830,7 +830,7 @@ float4 fragOutline2(v2fOutline i) : SV_Target
     UNITY_SETUP_INSTANCE_ID(i);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
     float4 col = LumiOutlineColor(i, _Outline2Color, _Outline2MainBlend, _Outline2EnableLighting, false);
-    col.rgb += LumiALOutline(i.uv0);
+    col.rgb += LumiALOutline(i.uv0, i.posWS);
     return col;
 }
 
