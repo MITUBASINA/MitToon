@@ -787,6 +787,7 @@ Shader "MitToon/MitToon TwoPass Tessellation"
         _AngelBreakup ("途切れ|Breakup", Range(0, 1)) = 0.5
         _AngelFrequency ("途切れの細かさ (UV.x)|Breakup Frequency (UV.x)", Range(1, 200)) = 60
         _AngelLightInfluence ("ライト色の影響|Light Influence", Range(0, 1)) = 1
+        _AngelViewFollow ("カメラの向きに追従|Follow the Camera", Range(0, 1)) = 0
         [Toggle(_LUMI_HOLOGRAM)] _UseHologram ("ホログラム / スキャンライン|Hologram / Scanlines", Float) = 0
         [HDR] _HoloColor ("色|Color", Color) = (0.3, 0.8, 1, 1)
         _HoloStrength ("強度|Strength", Range(0, 1)) = 0.5
@@ -803,7 +804,7 @@ Shader "MitToon/MitToon TwoPass Tessellation"
         _WorldAdapt ("ワールドの明るさに順応|World Brightness Adaptation", Range(0, 1)) = 0
         _WorldAdaptTarget ("目標の明るさ|Target Brightness", Range(0.05, 2)) = 0.8
         _WorldAdaptRange ("補正の上限 (倍)|Max Correction (x)", Range(1, 8)) = 3
-        [IntRange] _DebugView ("デバッグ表示|Debug View", Range(0, 9)) = 0
+        [IntRange] _DebugView ("デバッグ表示|Debug View", Range(0, 10)) = 0
 
         // ---------- tessellation (used by the Tessellation shader variants only) ----------
         _TessEdgeLength ("分割の細かさ (画面上の辺の長さ px)|Edge Length (pixels on screen)", Range(2, 50)) = 12
@@ -837,6 +838,19 @@ Shader "MitToon/MitToon TwoPass Tessellation"
         _RichWrap ("光の回り込み|Light Wrap", Range(0, 1)) = 0.2
         _RichAmbientRim ("環境光のフチ光|Ambient Rim", Range(0, 1)) = 0.25
         [Enum(Fresnel,0,Toon (silhouette only),1)] _RichAmbientRimMode ("フチ光の方式 (トゥーン = 輪郭だけ)|Ambient Rim Mode (toon = silhouette only)", Float) = 0
+        [ToggleUI] _UseEdgeTint ("輪郭の色づき|Edge Tint", Float) = 0
+        [HDR] _EdgeTintColor ("色 (A=強度)|Color (A=strength)", Color) = (1, 0.42, 0.36, 1)
+        _EdgeTintMask ("マスク (肌など)|Mask (skin etc.)", 2D) = "white" {}
+        _EdgeTintWidth ("幅|Width", Range(0.01, 1)) = 0.6
+        _EdgeTintSoftness ("じんわり度 (ぼかし)|Softness", Range(0, 1)) = 1
+        _EdgeTintPower ("かかり方のカーブ|Falloff Curve", Range(0.25, 4)) = 1
+        _EdgeTintNormalMap ("ノーマルマップの影響|Normal Map Influence", Range(0, 1)) = 0
+        _EdgeTintAlbedo ("下地の色から作る|Derive from the Base Colour", Range(0, 1)) = 0
+        _EdgeTintKeepBrightness ("明るさを保つ (色味だけ変える)|Keep Brightness (hue only)", Range(0, 1)) = 0
+        [ToggleUI] _EdgeTintUseShadowColor ("影側は別の色|Separate Shadow-Side Colour", Float) = 0
+        [HDR] _EdgeTintShadowColor ("影側の色 (A=強度)|Shadow-Side Colour (A=strength)", Color) = (0.85, 0.22, 0.25, 1)
+        _EdgeTintLitSide ("光の向きで偏らせる (+明るい側 / -影側)|Light Side Bias (+lit / -shadow)", Range(-1, 1)) = 0
+        _EdgeTintGlow ("ほんのり光らせる (加算)|Glow (additive)", Range(0, 2)) = 0
         _RichSoftSpec ("柔らかい光沢 (2層目)|Soft Gloss (2nd lobe)", Range(0, 1)) = 0.2
         _RichSoftSpecRoughness ("柔らかい光沢の粗さ|Soft Gloss Roughness", Range(0.2, 1)) = 0.6
         _RichMicroContrast ("ディテールの陰影強調|Detail Contrast", Range(0, 1)) = 0.2

@@ -554,6 +554,7 @@ namespace MitToon.Editor
             DrawAniso();
             DrawCloth();
             DrawSkin();
+            DrawEdgeTint();
             DrawAngelRing();
 
             Category("マットキャップ & リム", "MatCap & Rim");
@@ -1672,10 +1673,25 @@ namespace MitToon.Editor
             EndModule();
         }
 
+        // the silhouette edge softly takes a colour (skin reddening at its edge); multiplies, never glows
+        void DrawEdgeTint()
+        {
+            if (!Module("edgetint", "輪郭の色づき", "Edge Tint", "_UseEdgeTint")) return;
+            Prop("_EdgeTintColor");
+            Tex("_EdgeTintMask");
+            Sub("かかり方", "Falloff");
+            Props("_EdgeTintWidth", "_EdgeTintSoftness", "_EdgeTintPower", "_EdgeTintNormalMap", "_EdgeTintLitSide");
+            Sub("色の作り方", "Colour");
+            Props("_EdgeTintAlbedo", "_EdgeTintKeepBrightness", "_EdgeTintUseShadowColor");
+            if (When(F("_EdgeTintUseShadowColor") > 0.5f)) Prop("_EdgeTintShadowColor");
+            Prop("_EdgeTintGlow");
+            EndModule();
+        }
+
         void DrawAngelRing()
         {
             if (!Module("angelring", "天使の輪 (テクスチャ不要)", "Angel Ring (procedural)", "_UseAngelRing")) return;
-            Props("_AngelColor", "_AngelHeight", "_AngelWidth", "_AngelBlur", "_AngelBreakup", "_AngelFrequency", "_AngelLightInfluence", "_AngelShadowMask");
+            Props("_AngelColor", "_AngelHeight", "_AngelWidth", "_AngelBlur", "_AngelBreakup", "_AngelFrequency", "_AngelLightInfluence", "_AngelShadowMask", "_AngelViewFollow");
             EndModule();
         }
 
@@ -2117,8 +2133,8 @@ namespace MitToon.Editor
         {
             var p = P("_DebugView");
             if (p == null || !Show(p)) return;
-            var o = JP ? new[] { "オフ", "アルベド", "法線", "ライティング", "影", "AO", "深度の有効性", "曲率", "環境光 (SH / LV)", "ライトボリューム" }
-                       : new[] { "Off", "Albedo", "Normal", "Lighting", "Shadow", "Ambient Occlusion", "Depth Validity", "Curvature", "Ambient (SH / LV)", "Light Volume" };
+            var o = JP ? new[] { "オフ", "アルベド", "法線", "ライティング", "影", "AO", "深度の有効性", "曲率", "環境光 (SH / LV)", "ライトボリューム", "オフセットリムの深度判定 (赤=不一致 / 緑=リム / 青み=右目)" }
+                       : new[] { "Off", "Albedo", "Normal", "Lighting", "Shadow", "Ambient Occlusion", "Depth Validity", "Curvature", "Ambient (SH / LV)", "Light Volume", "Offset Rim Depth Check (red=mismatch / green=rim / blue=right eye)" };
             EditorGUI.BeginChangeCheck();
             int v = EditorGUILayout.Popup(Label(p), Mathf.RoundToInt(p.floatValue), o.Select(x => new GUIContent(x)).ToArray());
             if (EditorGUI.EndChangeCheck()) p.floatValue = v;

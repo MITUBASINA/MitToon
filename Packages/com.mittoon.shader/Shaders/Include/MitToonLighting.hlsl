@@ -670,6 +670,37 @@ float3 LumiURPShade(LumiSurface s, LumiInputData d, LumiLight ml, float3 aoIndir
     return col + s.emission;
 }
 
+// edge tint: toward the silhouette the colour softly takes a tint (skin reddening at its edge, light scattered under it).
+// A multiplier on the lit colour (not added light); only the optional glow adds, scaled by the light reaching the
+// surface (the caller), so it never shines in the dark. lit = 1 on the lit side (base pass toon result)
+// returns row 0 = the multiplier, row 1 = the glow (no out parameter: FXC then warns of uninitialized variables)
+float2x3 LumiEdgeTint(LumiSurface s, LumiInputData d, float lit)
+{
+    float3 m = 1.0, glow = 0;
+    if (_UseEdgeTint > 0.5 && d.facing > 0)
+    {
+        float3 n = normalize(lerp(s.Ng, s.N, _EdgeTintNormalMap));
+        float edge = 1.0 - saturate(dot(n, d.viewDirWS));
+        float w = _EdgeTintWidth;
+        float f = smoothstep(1.0 - w, 1.0 - w * (1.0 - _EdgeTintSoftness) + 1e-3, edge);
+        f = pow(f, _EdgeTintPower);
+        f *= LUMI_SAMPLE(_EdgeTintMask, LUMI_TF(_EdgeTintMask, s.uvMain)).r;
+        float ls = _EdgeTintLitSide;   // + toward the lit side, - toward the shadow side
+        f *= ls >= 0.0 ? lerp(1.0, lit, ls) : lerp(1.0, 1.0 - lit, -ls);
+        float4 tc = _EdgeTintUseShadowColor > 0.5 ? lerp(_EdgeTintShadowColor, _EdgeTintColor, lit) : _EdgeTintColor;
+        // from the base colour: its own hue deepened (skin -> deeper red), at the tint colour's brightness
+        float am = max(s.albedo.r, max(s.albedo.g, s.albedo.b));
+        float3 deep = am > 1e-4 ? s.albedo / am : 1.0;
+        tc.rgb = lerp(tc.rgb, deep * deep * max(tc.r, max(tc.g, tc.b)), _EdgeTintAlbedo);
+        // keep brightness: the multiplier's luminance goes to 1, only the hue changes
+        float3 tint = lerp(tc.rgb, tc.rgb / max(LumiLuminance(tc.rgb), 1e-3), _EdgeTintKeepBrightness);
+        float a = saturate(f) * tc.a;
+        m = lerp(1.0.xxx, tint, a);
+        glow = tc.rgb * (a * _EdgeTintGlow);
+    }
+    return float2x3(m, glow);
+}
+
 float3 LumiShadeAdditional(LumiSurface s, LumiInputData d, LumiCtx c, LumiLight light)
 {
     [branch] if (LUMI_URP_MODEL)
@@ -744,6 +775,8 @@ float3 LumiShadeAdditional(LumiSurface s, LumiInputData d, LumiCtx c, LumiLight 
     }
     float3 col = diffA * coatAtten + spec;
     col += LumiTransmission(s, c, L, lc, s.uvMain);
+    float2x3 et = LumiEdgeTint(s, d, 1.0);
+    col = col * et[0] + et[1] * lc * (light.shadowAttenuation * saturate(dot(s.N, L) * 0.5 + 0.5));
     return lerp(col, 0, _AsUnlit);
 }
 
@@ -1444,9 +1477,12 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
 
 #if defined(_LUMI_ANGELRING)
     {
-        // procedural hair highlight ring: band of view space normal Y, broken up along UV.x
+        // procedural hair highlight ring: band of the normal's height (how much it points up), broken up along UV.x.
+        // Measured against the world's up so the ring stays on the hair wherever the camera is; "view follow" blends
+        // toward the camera's up (1 = the old view space ring, which slid over the hair as the camera moved / tilted)
         float3 nV = LumiWorldToViewDir(s.N);
-        float band = smoothstep(_AngelWidth, _AngelWidth * (1.0 - _AngelBlur), abs(nV.y - _AngelHeight));
+        float3 upV = normalize(lerp(float3(0, 1, 0), UNITY_MATRIX_V[1].xyz, _AngelViewFollow) + float3(0, 1e-4, 0));
+        float band = smoothstep(_AngelWidth, _AngelWidth * (1.0 - _AngelBlur), abs(dot(s.N, upV) - _AngelHeight));
         band *= saturate(nV.z * 2.0);
         float br = sin(d.uv0.x * _AngelFrequency * 6.2831853) * 0.5 + 0.5;
         br = lerp(br, LumiHash12(floor(d.uv0.x * _AngelFrequency).xx), 0.5);
@@ -1457,6 +1493,8 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
 
     float3 offRimEmis;
     col = LumiOffsetRimLayer(col, s, d, c, gi, mainColor, mainLight.color, lit, offRimEmis);
+    float2x3 et = LumiEdgeTint(s, d, lit);
+    col = col * et[0] + et[1] * lerp(c.shadeLight, c.litLight, lit);   // glow: as much as the light reaching it
 
 #if defined(_LUMI_HOLOGRAM)
     {
@@ -1515,6 +1553,21 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         else if (dv == 6) col = c.depthValidity.xxx;
         else if (dv == 7) col = float3(saturate(lumiCurvature), 0.2, saturate(-lumiCurvature));
         else if (dv == 9) col = lumiLVActive > 0.5 ? max(LumiEvalL1(s.N), 0) : float3(0.25, 0.0, 0.25);   // purple: no light volume here
+        else if (dv == 10)
+        {
+            // offset rim check (VR: compare the eyes): red = the depth texture does not match this surface (the rim
+            // falls back to fresnel), green = the depth step the rim finds, blue tint = right eye
+            float rr = 0;
+#if defined(_LUMI_OFFSETRIM)
+            rr = LumiOffsetRim(s.N, c.toonDir, d.screenUV, d.eyeDepth, c.NoV, 1.0);
+#endif
+#if defined(USING_STEREO_MATRICES)
+            float eye = (float)unity_StereoEyeIndex;
+#else
+            float eye = 0;
+#endif
+            col = float3(1.0 - c.depthValidity, saturate(rr), 0.35 * eye);
+        }
         else col = LumiGIIrradiance(gi, s.N);
     }
     return float4(col, s.alpha);

@@ -200,7 +200,7 @@ CBUFFER_START(UnityPerMaterial)
     float4 _HatchColor;
     float  _HatchSpace, _HatchDensity, _HatchAngle, _HatchWidth, _HatchThreshold, _HatchCross, _HatchNoise;
     float4 _AngelColor;
-    float  _AngelHeight, _AngelWidth, _AngelBlur, _AngelBreakup, _AngelFrequency, _AngelLightInfluence;
+    float  _AngelHeight, _AngelWidth, _AngelBlur, _AngelBreakup, _AngelFrequency, _AngelLightInfluence, _AngelViewFollow;
     float4 _HoloColor;
     float  _HoloStrength, _HoloLineDensity, _HoloLineSpeed, _HoloFresnel, _HoloFlicker, _HoloAlpha;
     float4 _SkyTopColor, _SkyHorizonColor, _SkyGroundColor;
@@ -243,6 +243,10 @@ CBUFFER_START(UnityPerMaterial)
     float4 _ALColor, _ALMask_ST;
     float  _UseALSolo, _ALBand, _ALWaveMode, _ALWaveLength, _ALStrength, _ALMin, _ALMainBlend, _ALOutline, _ALNoSignal;
     float  _ALEnvColor, _ALEnvSaturation, _ALRainbow, _ALRainbowSpeed, _ALRainbowScale, _ALRainbowMode;
+    // edge tint (the silhouette edge of skin softly reddens)
+    float4 _EdgeTintColor, _EdgeTintMask_ST, _EdgeTintShadowColor;
+    float  _UseEdgeTint, _EdgeTintWidth, _EdgeTintSoftness, _EdgeTintLitSide, _EdgeTintPower, _EdgeTintNormalMap, _EdgeTintAlbedo,
+           _EdgeTintKeepBrightness, _EdgeTintUseShadowColor, _EdgeTintGlow;
 CBUFFER_END
 // set globally by the VRChat client (0 = normal view)
 float _VRChatMirrorMode;
@@ -282,6 +286,7 @@ Texture2D _TessMask;
 Texture2D _EyeGuardMask;
 Texture2D _EyeParallaxMask;
 Texture2D _ALMask;
+Texture2D _EdgeTintMask;
 TextureCube _ReflCube;
 Texture2D _AudioTexture;       float4 _AudioTexture_TexelSize;
 
