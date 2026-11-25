@@ -150,7 +150,6 @@ Shader "MitToon/MitToon"
         // ---------- lilToon mode ----------
         [Toggle(_LUMI_COMPAT)] _CompatShading ("lilToon モード|lilToon Mode", Float) = 0
         [ToggleUI] _URPShading ("URP ライティング (物理ベース)|URP Lighting (physically based)", Float) = 0
-        _RTSkyLight ("空の光を光線で影付け|Sky Light Shadowed by Rays", Range(0, 1)) = 1
         _URPMixDiffuse ("URP の陰影を混ぜる (自然な立体感)|Mix URP Shading (natural volume)", Range(0, 1)) = 0
         _URPMixSpecular ("URP のハイライトと映り込みを混ぜる|Mix URP Highlights and Reflections", Range(0, 1)) = 0
         _Shadow3rdColor ("3影の色|3rd Shadow Color", Color) = (0, 0, 0, 0)
@@ -297,31 +296,6 @@ Shader "MitToon/MitToon"
         _ContactShadowMask ("受ける側のマスク (R, 黒 = 影なし)|Receive Mask (R, black = none)", 2D) = "white" {}
         _ContactShadowMaskStrength ("マスクの強さ|Mask Strength", Range(0, 1)) = 1
         _NoiseBlur ("ぼかし (ピクセル, GrabPass)|Blur (pixels, GrabPass)", Range(0, 16)) = 0
-        [Toggle(_LUMI_RAYTRACE)] _UseRayTrace ("疑似レイトレーシング (非推奨)|Pseudo Ray Tracing (deprecated)", Float) = 0
-        _RTShadowStrength ("光線追跡の影の強さ|Ray Traced Shadow Strength", Range(0, 1)) = 1
-        _RTShadowLength ("影の光線の長さ (m)|Shadow Ray Length (m)", Range(0.05, 3)) = 0.6
-        _RTShadowSoftness ("影のやわらかさ (光源の角度)|Shadow Softness (light angle)", Range(0, 15)) = 3
-        _RTShadowRays ("影の光線の数|Shadow Rays", Range(1, 4)) = 2
-        _RTShadowSteps ("影のステップ数|Shadow Steps", Range(4, 24)) = 12
-        _RTShadowThickness ("影: 物の厚み (m)|Shadow: Object Thickness (m)", Range(0.01, 1)) = 0.15
-        _RTShadowBias ("影: 開始オフセット (m)|Shadow: Start Offset (m)", Range(0, 0.05)) = 0.01
-        _RTAOStrength ("光線追跡 AO の強さ|Ray Traced AO Strength", Range(0, 2)) = 1
-        _RTAORadius ("AO の光線の長さ (m)|AO Ray Length (m)", Range(0.02, 2)) = 0.3
-        _RTAORays ("AO の光線の数|AO Rays", Range(2, 8)) = 4
-        _RTAOSteps ("AO のステップ数|AO Steps", Range(2, 8)) = 4
-        _RTAOThickness ("AO: 物の厚み (m)|AO: Object Thickness (m)", Range(0.01, 1)) = 0.2
-        _RTAOMultiBounce ("AO の照り返し (明るい色は暗くなりすぎない)|AO Multi-Bounce (bright colours darken less)", Range(0, 1)) = 1
-        _RTGIStrength ("照り返しの強さ|Bounce Strength", Range(0, 2)) = 1
-        _RTGIRays ("照り返しの光線の数|Bounce Rays", Range(1, 8)) = 4
-        _RTGILength ("照り返しの光線の長さ (m)|Bounce Ray Length (m)", Range(0.1, 5)) = 1.5
-        _RTGISpecular ("照り返しのハイライト|Bounce Highlight", Range(0, 2)) = 1
-        _RTGIMaxBright ("光る物の明るさの上限|Max Brightness of Glowing Things", Range(1, 16)) = 4
-        _RTReflStrength ("映り込みの強さ|Reflection Strength", Range(0, 1)) = 1
-        _RTReflLength ("映り込みの光線の長さ (m)|Reflection Ray Length (m)", Range(0.2, 20)) = 5
-        _RTReflSteps ("映り込みのステップ数|Reflection Steps", Range(8, 48)) = 24
-        _RTReflThickness ("映り込み: 物の厚み (m)|Reflection: Object Thickness (m)", Range(0.02, 2)) = 0.3
-        _RTReflRoughCut ("映り込むざらつきの上限|Max Roughness for Reflections", Range(0.05, 1)) = 0.6
-        _RTMaxDistance ("有効距離 (m)|Max Distance (m)", Range(1, 50)) = 10
 
         // ---------- SSS / Backlight ----------
         [Toggle(_LUMI_SSS)] _UseSSS ("サブサーフェス (肌)|Subsurface (Skin)", Float) = 0
@@ -805,6 +779,7 @@ Shader "MitToon/MitToon"
         _WorldAdaptTarget ("目標の明るさ|Target Brightness", Range(0.05, 2)) = 0.8
         _WorldAdaptRange ("補正の上限 (倍)|Max Correction (x)", Range(1, 8)) = 3
         [IntRange] _DebugView ("デバッグ表示|Debug View", Range(0, 10)) = 0
+        _VRParallax ("VR の目ごとの見え方 (リム / マットキャップなど)|VR Per-Eye Looks (rims, matcaps...)", Range(0, 1)) = 0
 
         // ---------- tessellation (used by the Tessellation shader variants only) ----------
         _TessEdgeLength ("分割の細かさ (画面上の辺の長さ px)|Edge Length (pixels on screen)", Range(2, 50)) = 12
@@ -968,7 +943,6 @@ Shader "MitToon/MitToon"
             #pragma target 4.5
             #pragma vertex vert
             #pragma fragment fragBase
-            #pragma shader_feature_local _LUMI_RAYTRACE
             #pragma multi_compile_fwdbase nolightmap nodynlightmap nodirlightmap
             #pragma multi_compile_vertex _ FOG_LINEAR FOG_EXP FOG_EXP2
             #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED LIGHTPROBE_SH
@@ -1035,7 +1009,6 @@ Shader "MitToon/MitToon"
             #pragma target 4.5
             #pragma vertex vert
             #pragma fragment fragBase
-            #pragma shader_feature_local _LUMI_RAYTRACE
             #pragma multi_compile_fwdbase nolightmap nodynlightmap nodirlightmap
             #pragma multi_compile_vertex _ FOG_LINEAR FOG_EXP FOG_EXP2
             #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED LIGHTPROBE_SH
@@ -1099,7 +1072,6 @@ Shader "MitToon/MitToon"
             #pragma target 4.5
             #pragma vertex vert
             #pragma fragment fragAdd
-            #pragma shader_feature_local _LUMI_RAYTRACE
             #pragma multi_compile_fwdadd_fullshadows
             #pragma multi_compile_vertex _ FOG_LINEAR FOG_EXP FOG_EXP2
             #pragma skip_variants LIGHTMAP_ON DYNAMICLIGHTMAP_ON LIGHTMAP_SHADOW_MIXING SHADOWS_SHADOWMASK DIRLIGHTMAP_COMBINED LIGHTPROBE_SH

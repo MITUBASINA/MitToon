@@ -13,7 +13,8 @@ struct LumiInputData
     float3 posOS;
     float3 normalWS;     // interpolated, not normalized
     float4 tangentWS;    // w = sign
-    float3 viewDirWS;    // normalized, surface -> camera
+    float3 viewDirWS;    // normalized, surface -> camera (this eye in VR)
+    float3 styleViewDirWS; // surface -> head (between the eyes in VR, see LumiStyleEyePositionWS): rims, matcaps...
     float4 color;
     float2 screenUV;
     float2 pixelPos;
@@ -381,7 +382,7 @@ LumiSurface LumiInitSurface(LumiInputData d)
         if (abs(_ViewHueShift) > 1e-4)
         {
             float3 hsv = LumiRGB2HSV(col.rgb);
-            float f = 1.0 - saturate(dot(normalize(d.normalWS), d.viewDirWS));
+            float f = 1.0 - saturate(dot(normalize(d.normalWS), d.styleViewDirWS));
             hsv.x = frac(hsv.x + _ViewHueShift * f * f);
             col.rgb = LumiHSV2RGB(hsv);
         }

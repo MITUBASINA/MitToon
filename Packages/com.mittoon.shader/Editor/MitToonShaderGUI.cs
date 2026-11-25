@@ -62,12 +62,9 @@ namespace MitToon.Editor
             ("_UseFillLight", "_LUMI_FILLLIGHT"), ("_UseGradient", "_LUMI_GRADIENT"), ("_UseHatch", "_LUMI_HATCH"),
             ("_UseAngelRing", "_LUMI_ANGELRING"), ("_UseHologram", "_LUMI_HOLOGRAM"), ("_CompatShading", "_LUMI_COMPAT"),
             ("_UseDepthShadow", "_LUMI_DEPTHSHADOW"), ("_UseInkLine", "_LUMI_INKLINE"), ("_UseFPSMode", "_LUMI_FPSMODE"),
-            ("_UseRayTrace", "_LUMI_RAYTRACE"), ("_URPShading", "_LUMI_URPSHADING"),
+            ("_URPShading", "_LUMI_URPSHADING"),
         };
 
-        public const string RayTraceShader = "MitToon/MitToon RayTrace";
-        public const int RayTraceQueue = 2499;   // after the world's opaque objects, still in the depth texture
-        public static bool IsRayTrace(Material m) => m != null && m.shader != null && m.shader.name == RayTraceShader;
 
         const string LightVolumesInclude = "Packages/red.sim.lightvolumes/Shaders/LightVolumes.cginc";
         static bool? lvInstalled;
@@ -1145,12 +1142,7 @@ namespace MitToon.Editor
                 if (pu != null) pu.floatValue = v == 2 ? 1 : 0;
                 foreach (var t in me.targets) SyncKeywords((Material)t);
             }
-            var pr = P("_UseRayTrace");
-            bool rtOn = pu != null && pu.floatValue > 0.5f && pr != null && pr.floatValue > 0.5f;
-            if (rtOn)
-                Info("URP と同じ物理ベースの光に、疑似レイトレーシングの光線を組み合わせています。ライトプローブの光から空の主な向きの光を取り出して光線で影を落とし (ディレクショナルライトの無いワールドでも影が出ます)、ポイントライト・スポットライトにも光線の影が付きます。RayTrace シェーダーでは映り込みと照り返しも加わります。設定は「疑似レイトレーシング」にあります。",
-                     "URP's physically based light combined with the pseudo ray tracing. The main direction of the sky is taken out of the light probes and shadowed by rays (shadows even in worlds without a directional light), and point / spot lights get ray traced shadows too. The RayTrace shader adds reflections and colour bounce. Settings are in Pseudo Ray Tracing.", MessageType.None);
-            else if (pu != null && pu.floatValue > 0.5f)
+            if (pu != null && pu.floatValue > 0.5f)
                 Info("URP の Lit シェーダーと同じ計算で光を受けます。使われるのはベースカラー、ノーマルマップ、メタリック、スムースネス、AO、発光です (トゥーンの影、ライトの明るさ制限、MitToon GI は使われません)。",
                      "Lit like the URP Lit shader. Uses base colour, normal map, metallic, smoothness, AO and emission (no toon shadow, light limits or MitToon GI).", MessageType.None);
             EditorGUILayout.Space(2);
@@ -1260,7 +1252,7 @@ namespace MitToon.Editor
         void DrawScreenSpace()
         {
             if (!Module("ss", "スクリーンスペース (SSAO / 落ち影)", "Screen Space (SSAO / Shadows)", null, false, true)) return;
-            Prop("_NoiseBlur");     // spreads the sample origins over a disk: a real blur of AO / shadows at no extra cost   // 2x2 average of the dots of SSAO / contact / soft / PCSS / ray traced shadows
+            Prop("_NoiseBlur");     // spreads the sample origins over a disk: a real blur of AO / shadows at no extra cost   // 2x2 average of the dots of SSAO / contact / soft / PCSS shadows
             if (Module("ssao", "SSAO (アンビエントオクルージョン)", "SSAO", "_UseSSAO", true))
             {
                 SSAODebugButton();
@@ -1310,65 +1302,7 @@ namespace MitToon.Editor
                 Props("_ContactShadowJitter");
                 EndModule();
             }
-            DrawRayTrace();
             EndModule();
-        }
-
-        void DrawRayTrace()
-        {
-            if (!Module("raytrace", "疑似レイトレーシング (非推奨)", "Pseudo Ray Tracing (deprecated)", "_UseRayTrace", true)) return;
-            var mats = me.targets.Cast<Material>().ToArray();
-            bool grab = mats.All(IsRayTrace);
-            if (!collecting && !Searching)
-            {
-                Info("非推奨の機能です。VR、一部のワールドやカメラで色や影がおかしくなることがあり、今後の修正や改良は行いません。新しく使うのはおすすめしません。影の付き方は「接触影」「SSAO」、光沢は反射プローブで代わりになります。",
-                     "Deprecated. It can show wrong colours or shadows in VR and in some worlds or cameras, and will not be fixed or improved further. Not recommended for new materials; contact shadows, SSAO and the reflection probe cover most of it.", MessageType.Warning);
-                Info("深度テクスチャの上で光線を進めて、当たった所を調べます。影は光源の大きさに合わせてやわらかくなり、AO は物の隙間を暗くします。映り込みと色の照り返しは「MitToon RayTrace」シェーダーで使えます (面を描いた後に画面の色を読む GrabPass を使うため別のシェーダーです。マテリアルごとに画面をコピーするので、使う部位を絞ると軽くなります)。画面の外、物の裏側、後から描かれる物は映りません。",
-                     "Rays are marched through the depth texture. Shadows soften with the light size and the AO darkens gaps. Reflections and colour bounce need the \"MitToon RayTrace\" shader (it grabs the screen after drawing the surface, once per material, so use it only where needed). Things off screen, hidden behind others or drawn later are not reflected.", MessageType.None);
-                if (!grab && GUILayout.Button(T("RayTrace シェーダーに切り替える (非推奨)", "Switch to the RayTrace shader (deprecated)")))
-                    SwitchRayTrace(mats, true);
-                if (grab && GUILayout.Button(T("通常の MitToon シェーダーに戻す", "Back to the normal MitToon shader")))
-                    SwitchRayTrace(mats, false);
-            }
-            if (When(F("_URPShading") > 0.5f))
-            {
-                Sub("URP ライティングとの組み合わせ", "With the URP Lighting");
-                Prop("_RTSkyLight");
-            }
-            Sub("光線追跡の影", "Ray Traced Shadows");
-            Props("_RTShadowStrength", "_RTShadowLength", "_RTShadowSoftness", "_RTShadowRays", "_RTShadowSteps", "_RTShadowThickness", "_RTShadowBias");
-            Sub("光線追跡 AO", "Ray Traced AO");
-            Props("_RTAOStrength", "_RTAORadius", "_RTAORays", "_RTAOSteps", "_RTAOThickness", "_RTAOMultiBounce");
-            // always listed (so they can be found); greyed out until the material uses the RayTrace shader
-            Sub("照り返し・光る物からの光 (GI)", "Bounce Light / Light from Glowing Things (GI)");
-            if (!grab && !collecting && !Searching)
-                Info("照り返し・光る物からの光・映り込みは「MitToon RayTrace」シェーダーでだけ働きます。上のボタンで切り替えると使えるようになります。",
-                     "Bounce light, light from glowing things and reflections work only with the \"MitToon RayTrace\" shader. Switch with the button above to use them.", MessageType.None);
-            using (new EditorGUI.DisabledScope(!grab && !collecting && !Searching))
-            {
-                Props("_RTGIStrength", "_RTGIRays", "_RTGILength", "_RTGISpecular", "_RTGIMaxBright");
-                Sub("映り込み (SSR)", "Reflections (SSR)");
-                Props("_RTReflStrength", "_RTReflLength", "_RTReflSteps", "_RTReflThickness", "_RTReflRoughCut");
-            }
-            Sub("距離", "Distance");
-            Prop("_RTMaxDistance");
-            EndModule();
-        }
-
-        static void SwitchRayTrace(Material[] mats, bool toRT)
-        {
-            var sh = Shader.Find(toRT ? RayTraceShader : "MitToon/MitToon");
-            if (sh == null) return;
-            Undo.RecordObjects(mats, "MitToon RayTrace Shader");
-            foreach (var m in mats)
-            {
-                int mode = m.HasProperty("_RenderMode") ? Mathf.RoundToInt(m.GetFloat("_RenderMode")) : 0;
-                m.shader = sh;
-                if (mode <= 1) m.renderQueue = toRT ? (mode == 0 ? -1 : RayTraceQueue) : (mode == 0 ? -1 : (int)RenderQueue.AlphaTest);
-                if (toRT) m.SetFloat("_UseRayTrace", 1);
-                SyncKeywords(m);
-                EditorUtility.SetDirty(m);
-            }
         }
 
         // depth effects need _CameraDepthTexture: only rendered while a shadowed directional light exists (same as Poiyomi's DepthGet)
@@ -2144,6 +2078,9 @@ namespace MitToon.Editor
         {
             if (!Module("advanced", "詳細設定 (深度 / ステンシル)", "Advanced (Depth / Stencil)")) return;
             DebugPopup();
+            Prop("_VRParallax");
+            Info("0: リムやマットキャップなどを両目の中央から計算し、左右の目で同じ見え方にします (二重に見えたりチラついたりしません)。1: 以前の目ごとの計算です。デスクトップでは変わりません。",
+                 "0: rims, matcaps and similar looks are computed from between the eyes, so both eyes see the same (no doubled or flickering rims). 1: per eye, as before. No change on desktop.", MessageType.None);
             Props("_ZWrite", "_ZTest", "_AlphaToMask", "_OffsetFactor", "_OffsetUnits");
             DrawStencil();
             if (!collecting && !Searching)
@@ -2371,11 +2308,7 @@ namespace MitToon.Editor
 
         public static void SyncKeywords(Material m)
         {
-            // RayTrace shader, opaque: the AO is handed to the composite pass through the alpha (see ApplyRenderMode)
-            if (m.HasProperty("_RTAlphaDst") && m.HasProperty("_RenderMode"))
-                m.SetFloat("_RTAlphaDst", Mathf.RoundToInt(m.GetFloat("_RenderMode")) == 0 ? (float)BlendMode.Zero : (float)BlendMode.OneMinusSrcAlpha);
-            // clean blur: the GrabPass ("Always") only runs while Blur is on (the RayTrace shader's own grabs are tagged
-            // ForwardBase and always run)
+            // clean blur: the GrabPass ("Always") only runs while Blur is on
             if (m.HasProperty("_NoiseBlur"))
                 m.SetShaderPassEnabled("Always", (m.GetFloat("_NoiseBlur") > 0.5f && !(m.HasProperty("_CompatShading") && m.GetFloat("_CompatShading") > 0.5f)));
             foreach (var (prop, kw) in KeywordMap)
@@ -2419,7 +2352,7 @@ namespace MitToon.Editor
                     Set(m, BlendMode.One, BlendMode.Zero, BlendMode.One, BlendMode.One, 1, reset);
                     m.EnableKeyword("_ALPHATEST_ON");
                     m.SetOverrideTag("RenderType", "TransparentCutout");
-                    if (reset) m.renderQueue = IsRayTrace(m) ? RayTraceQueue : (int)RenderQueue.AlphaTest;
+                    if (reset) m.renderQueue = (int)RenderQueue.AlphaTest;
                     if (reset && m.HasProperty("_AlphaToMask")) m.SetFloat("_AlphaToMask", 1);   // anti-aliased cutout edge
                     break;
                 case 2:
@@ -2449,10 +2382,6 @@ namespace MitToon.Editor
                     if (reset) m.renderQueue = -1;
                     break;
             }
-            // RayTrace shader, opaque: the main pass hands its AO to the composite pass through the alpha (see
-            // LumiRTAOHandoff), which needs the alpha written as it is
-            if (m.HasProperty("_RTAlphaDst"))
-                m.SetFloat("_RTAlphaDst", mode == 0 ? (float)BlendMode.Zero : (float)BlendMode.OneMinusSrcAlpha);
             // the shadow light multiplies what is drawn by the output alpha (plain lights write 1, so nothing changes)
             if (ShadowLightBlend(m))
             {

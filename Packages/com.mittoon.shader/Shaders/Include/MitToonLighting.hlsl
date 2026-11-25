@@ -11,6 +11,8 @@ struct LumiCtx
 {
     float3 V;
     float  NoV;
+    float3 hV;           // view direction for the looks (rims, matcaps...): from the head in VR, same in both eyes
+    float  hNoV;
     float3 toonDir;      // light direction used for toon shading (main light + SH)
     float3 litLight;     // limited light color for lit side
     float3 shadeLight;   // limited light color for shadow side
@@ -311,7 +313,7 @@ float3 LumiDirectSpecular(LumiSurface s, LumiCtx c, float3 L, float3 lightColor,
         float3 sheen = _SheenColor.rgb * LUMI_SAMPLE(_SheenMap, LUMI_TF(_SheenMap, uv)).rgb * LUMI_SAMPLE(_SheenMask, LUMI_TF(_SheenMask, uv)).r;
         spec += sheen * LumiD_Sheen(NoH, max(_SheenRoughness, 0.05)) * LumiV_Sheen(c.NoV, NoL) * (LUMI_PI * NoL);
         // velvet edge: fuzz that glows toward the silhouette on the lit side
-        spec += sheen * _SheenFuzz * pow(saturate(1.0 - c.NoV), _SheenFuzzPower) * saturate(dot(s.N, L) * 0.5 + 0.5);
+        spec += sheen * _SheenFuzz * pow(saturate(1.0 - c.hNoV), _SheenFuzzPower) * saturate(dot(s.N, L) * 0.5 + 0.5);
     }
 #endif
 
@@ -345,15 +347,15 @@ float3 LumiTransmission(LumiSurface s, LumiCtx c, float3 L, float3 lightColor, f
 #if defined(_LUMI_SSS)
     {
         float3 Lt = L + s.N * _TransmissionDistortion;
-        float t = pow(saturate(dot(c.V, -Lt)), max(_TransmissionPower, 0.1)) * _TransmissionStrength;
+        float t = pow(saturate(dot(c.hV, -Lt)), max(_TransmissionPower, 0.1)) * _TransmissionStrength;
         o += t * s.thickness * s.sssMask * _SSSColor.rgb * s.albedo * lightColor;
     }
 #endif
 #if defined(_LUMI_BACKLIGHT)
     {
         float3 Nb = normalize(lerp(s.Ng, s.N, _BacklightNormalStrength));
-        float rim = 1.0 - saturate(dot(Nb, c.V));
-        float viewF = lerp(1, saturate(dot(-L, c.V)), _BacklightViewStrength);
+        float rim = 1.0 - saturate(dot(Nb, c.hV));
+        float viewF = lerp(1, saturate(dot(-L, c.hV)), _BacklightViewStrength);
         float dirF = pow(saturate(-dot(Nb, L) * 0.5 + 0.5), max(_BacklightDirectivity, 0.01));
         float b = LumiSmoothBorder(rim, _BacklightBorder, _BacklightBlur) * dirF * viewF;
         float4 m = LUMI_SAMPLE(_BacklightMask, LUMI_TF(_BacklightMask, uv));
@@ -450,8 +452,8 @@ float3 LumiCompatBlend(float3 dst, float3 src, float3 a, float mode)
 
 float2 LumiCompatMatCapUV(float3 N, float3 V, float4 st, float zRotCancel, float perspective)
 {
-    float3 nV = (perspective > 0.5 && unity_OrthoParams.w < 0.5) ? V : UNITY_MATRIX_V[2].xyz;
-    float3 bV = zRotCancel > 0.5 ? float3(0, 1, 0) : UNITY_MATRIX_V[1].xyz;
+    float3 nV = (perspective > 0.5 && unity_OrthoParams.w < 0.5) ? V : LumiStyleViewRow(2);
+    float3 bV = zRotCancel > 0.5 ? float3(0, 1, 0) : LumiStyleViewRow(1);
     bV = normalize(bV - nV * dot(nV, bV));
     float3 tV = cross(nV, bV);
     float2 m = float2(dot(tV, N), dot(bV, N));
@@ -570,7 +572,7 @@ LumiURPBRDF LumiURPInit(LumiSurface s)
     b.grazing = saturate((1.0 - s.perceptualRough) + (1.0 - oneMinusRefl));
     return b;
 }
-// toon amount in the URP / ray tracing models: N.L toward a cel step at the 1st border (0 = lambert, 1 = toon)
+// toon amount in the URP model: N.L toward a cel step at the 1st border (0 = lambert, 1 = toon)
 float LumiToonNoL(float NoL)
 {
     float x = NoL * 0.5 + 0.5;
@@ -600,73 +602,20 @@ float3 LumiURPSpecularTerm(LumiURPBRDF b, float3 N, float3 V, float3 L)
     float dd = NoH * NoH * b.rough2m1 + 1.00001;
     return b.specular * (b.rough2 / ((dd * dd) * max(0.1, LoH * LoH) * b.norm));
 }
-static float lumiRTValidity = 0;   // depth validity of this pixel, for the ray traced reflection in the URP model
-static float3 lumiRTBounce = 0;    // ray traced colour bounce of this pixel
-// ray tracing lighting: the light of the probes split into the sky's main direction (a light the rays can shadow,
-// with a real lambert falloff) and the even rest
-static float3 lumiSkyDir = float3(0, 1, 0), lumiSkyCol = 0;
-static float lumiSkyShadow = 1;
-// URP lighting with the pseudo ray tracing on: the probes' sky light is shadowed by rays (0 when the sky slider is 0)
-bool LumiRTLighting()
-{
-#if defined(_LUMI_RAYTRACE)
-    return LUMI_URP_MODEL && _RTSkyLight > 0.001;
-#else
-    return false;
-#endif
-}
-void LumiRTSkySplit()
-{
-    float3 px = LumiSampleSH(float3(1, 0, 0)), nx = LumiSampleSH(float3(-1, 0, 0));
-    float3 py = LumiSampleSH(float3(0, 1, 0)), ny = LumiSampleSH(float3(0, -1, 0));
-    float3 pz = LumiSampleSH(float3(0, 0, 1)), nz = LumiSampleSH(float3(0, 0, -1));
-    float3 A = (px + nx + py + ny + pz + nz) / 6.0;                  // L0 (the L2 terms cancel over the 6 axes)
-    float3 Bx = (px - nx) * 0.5, By = (py - ny) * 0.5, Bz = (pz - nz) * 0.5;   // L1 per axis (x / y / z per channel)
-    float3 lw = float3(0.2126, 0.7152, 0.0722);
-    float3 bl = float3(dot(Bx, lw), dot(By, lw), dot(Bz, lw));
-    float bln = length(bl);
-    lumiSkyDir = bln > 1e-6 ? bl / bln : float3(0, 1, 0);
-    // a light C from one direction is C (1/4 + n.d / 2) in the first two bands: C = 2 B along it, at most what keeps
-    // the rest positive everywhere (4 L0). Taken as luminance, in the colour of the probes' average: per channel the
-    // channels whose light comes from elsewhere (a warm floor below a green ceiling) dropped out of it, so the shadow
-    // took away only green and left purple.
-    float la = LumiLuminance(max(A, 0.0));
-    float sl = min(2.0 * bln, 4.0 * la) * _RTSkyLight;
-    lumiSkyCol = la > 1e-6 ? max(A, 0.0) * (sl / la) : 0.0;
-}
-float3 LumiRTSkySH(float3 N)
-{
-    float NoS = dot(N, lumiSkyDir);
-    // the probes without the sky's part, in the probes' own colour there (no channel clamped away), + the sky's part
-    // as a light the rays shadow
-    float3 sh = LumiToonSH(N);
-    float ls = LumiLuminance(sh);
-    float3 rest = ls > 1e-6 ? sh * saturate(1.0 - LumiLuminance(lumiSkyCol * (0.25 + 0.5 * NoS)) / ls) : 0.0;
-    return rest + lumiSkyCol * LumiToonNoL(NoS) * lumiSkyShadow;
-}
 float3 LumiURPShade(LumiSurface s, LumiInputData d, LumiLight ml, float3 aoIndirect, float3 aoDirect)
 {
     LumiURPBRDF b = LumiURPInit(s);
     float3 N = s.N, V = d.viewDirWS;
     float NoV = saturate(dot(N, V));
     // global illumination: probes along the normal + the reflection probe (fresnel toward the grazing colour)
-    float3 indirectDiffuse = (LumiRTLighting() ? LumiRTSkySH(N) : LumiToonSH(N)) * s.occlusion * aoIndirect;
+    float3 indirectDiffuse = LumiToonSH(N) * s.occlusion * aoIndirect;
     float3 R = reflect(-V, N);
-    float3 reflP = LumiSampleEnvironment(R, d.posWS, b.perceptualRough, 0, 1);
-    float3 refl = LumiRTReflection(reflP, d.posWS, N, V, b.perceptualRough, d.eyeDepth, d.pixelPos, lumiRTValidity);
+    float3 refl = LumiSampleEnvironment(R, d.posWS, b.perceptualRough, 0, 1);
     float fres = 1.0 - NoV; fres *= fres; fres *= fres;
     float3 kRefl = (lerp(b.specular, b.grazing.xxx, fres) / (b.rough2 + 1.0)) * s.specMask * s.occlusion * aoIndirect;
     float3 col = indirectDiffuse * b.diffuse + refl * kRefl;
-    float3 giSpec = 0;
-#if defined(LUMI_RAYTRACE_GRAB)
-    LumiURPBRDF bg = b;   // the bounce light is an area: wider lobe
-    bg.rough2 = saturate(b.rough2 + lumiRTGIA2); bg.rough2m1 = bg.rough2 - 1.0; bg.norm = sqrt(bg.rough2) * 4.0 + 2.0;
-    giSpec = LumiURPSpecularTerm(bg, N, V, lumiRTGIDir) * lumiRTGICol * saturate(dot(N, lumiRTGIDir)) * s.specMask * aoIndirect;
-#endif
-    lumiRTDelta = (refl - reflP) * kRefl + b.diffuse * lumiRTBounce + giSpec;
     float NoL = LumiToonNoL(dot(N, ml.direction));
     col += LumiURPDirect(b, N, V, ml.direction, ml.color * (ml.distanceAttenuation * ml.shadowAttenuation * NoL), s.specMask) * aoDirect;
-    col += b.diffuse * lumiRTBounce + giSpec;
     return col + s.emission;
 }
 
@@ -680,7 +629,7 @@ float2x3 LumiEdgeTint(LumiSurface s, LumiInputData d, float lit)
     if (_UseEdgeTint > 0.5 && d.facing > 0)
     {
         float3 n = normalize(lerp(s.Ng, s.N, _EdgeTintNormalMap));
-        float edge = 1.0 - saturate(dot(n, d.viewDirWS));
+        float edge = 1.0 - saturate(dot(n, d.styleViewDirWS));
         float w = _EdgeTintWidth;
         float f = smoothstep(1.0 - w, 1.0 - w * (1.0 - _EdgeTintSoftness) + 1e-3, edge);
         f = pow(f, _EdgeTintPower);
@@ -707,11 +656,6 @@ float3 LumiShadeAdditional(LumiSurface s, LumiInputData d, LumiCtx c, LumiLight 
     {
         LumiURPBRDF b = LumiURPInit(s);
         float NoL = LumiToonNoL(dot(s.N, light.direction));
-#if defined(_LUMI_RAYTRACE) && defined(UNITY_PASS_FORWARDADD)
-        // ray tracing lighting: point / spot lights cast ray traced shadows too (they rarely have a shadow map)
-        [branch] if (_RTShadowStrength > 0.001)
-            light.shadowAttenuation *= LumiQuadSmooth(LumiRTShadow(d.posWS, s.Ng, light.direction, d.eyeDepth, d.pixelPos, lumiRTValidity).xxxx, d.eyeDepth, d.pixelPos).x;
-#endif
         light.shadowAttenuation = lerp(light.shadowAttenuation, 1.0, LumiEyeGuard(s.uvMain) * _EyeGuardShadow);
         return LumiURPDirect(b, s.N, c.V, light.direction, light.color * (light.distanceAttenuation * light.shadowAttenuation * NoL), s.specMask);
     }
@@ -725,7 +669,7 @@ float3 LumiShadeAdditional(LumiSurface s, LumiInputData d, LumiCtx c, LumiLight 
         float mixA;
         float3 colA = LumiCompatShading(s, d, light.direction, light.direction, lcA, 0, at, false, mixA);
         lumiCompatFA = 1;
-        colA = LumiCompatEffects(colA, s, d, c.V, light.direction, light.direction, lcA, mixA, at);
+        colA = LumiCompatEffects(colA, s, d, c.hV, light.direction, light.direction, lcA, mixA, at);
         lumiCompatFA = 0;
         return colA;
     }
@@ -783,8 +727,8 @@ float3 LumiShadeAdditional(LumiSurface s, LumiInputData d, LumiCtx c, LumiLight 
 // ---- MatCap -------------------------------------------------------------------
 float2 LumiMatCapUV(float3 N, float3 V, float3 posWS, float perspective, float zRotCancel)
 {
-    float3 camUp = normalize(UNITY_MATRIX_V[1].xyz);
-    float3 viewZ = normalize(lerp(-UNITY_MATRIX_V[2].xyz, V, perspective));
+    float3 camUp = LumiStyleViewRow(1);
+    float3 viewZ = normalize(lerp(-LumiStyleViewRow(2), V, perspective));
     float3 up = normalize(lerp(camUp, float3(0, 1, 0), zRotCancel));
     float3 x = normalize(cross(up, viewZ));
     float3 y = cross(viewZ, x);
@@ -849,7 +793,7 @@ float3 LumiRimEnvLight(LumiGI gi, LumiCtx c, float3 mainColor, float3 N, float a
     return lerp(c.litLight, l, amount);
 }
 
-// rim lights 1 / 2 / 3 and the offset rim, shared by the MitToon model and the URP / ray tracing models
+// rim lights 1 / 2 / 3 and the offset rim, shared by the MitToon model and the URP model
 // (lit: 1 on the lit side, for the shadow masks; *Emis: the emissive part, added with the emission)
 float3 LumiRimLayers(float3 col, LumiSurface s, LumiInputData d, LumiCtx c, LumiGI gi, float3 mainColor, float lit, out float3 rimEmis)
 {
@@ -861,7 +805,7 @@ float3 LumiRimLayers(float3 col, LumiSurface s, LumiInputData d, LumiCtx c, Lumi
     [branch] if (_UseRim > 0.5)
     {
         float3 Nr = normalize(lerp(s.Ng, s.N, _RimNormalStrength));
-        float r = LumiSmoothBorder(pow(saturate(1.0 - dot(Nr, c.V)), _RimFresnelPower), _RimBorder, _RimBlur);
+        float r = LumiSmoothBorder(pow(saturate(1.0 - dot(Nr, c.hV)), _RimFresnelPower), _RimBorder, _RimBlur);
         if (_RimMode > 0.5 && c.depthValidity > 0.5)
             r = LumiDepthRim(Nr, d.screenUV, d.eyeDepth, _RimDepthWidth, _RimDepthThreshold) * lerp(1, r, 0.25);
         r = LumiRimLightMask(r, Nr, c.toonDir, _RimLightDir, _RimShadowMask, _RimBackfaceMask, _RimLitSideOnly, _RimLitSideBlur, lit, d.facing);
@@ -874,7 +818,7 @@ float3 LumiRimLayers(float3 col, LumiSurface s, LumiInputData d, LumiCtx c, Lumi
     [branch] if (_UseRim2 > 0.5)
     {
         float3 Nr = normalize(lerp(s.Ng, s.N, _Rim2NormalStrength));
-        float r = LumiSmoothBorder(pow(saturate(1.0 - dot(Nr, c.V)), _Rim2FresnelPower), _Rim2Border, _Rim2Blur);
+        float r = LumiSmoothBorder(pow(saturate(1.0 - dot(Nr, c.hV)), _Rim2FresnelPower), _Rim2Border, _Rim2Blur);
         r = LumiRimLightMask(r, Nr, c.toonDir, _Rim2LightDir, _Rim2ShadowMask, _Rim2BackfaceMask, _Rim2LitSideOnly, _Rim2LitSideBlur, lit, d.facing);
         float4 rt = LUMI_SAMPLE(_Rim2Tex, LUMI_TF(_Rim2Tex, uv));
         float3 rb = LumiRimHue(_Rim2Color.rgb, _Rim2HueSpeed) * rt.rgb * lerp(1, s.albedo, _Rim2MainStrength);
@@ -885,7 +829,7 @@ float3 LumiRimLayers(float3 col, LumiSurface s, LumiInputData d, LumiCtx c, Lumi
     [branch] if (_UseRim3 > 0.5)
     {
         float3 Nr = normalize(lerp(s.Ng, s.N, _Rim3NormalStrength));
-        float r = LumiSmoothBorder(pow(saturate(1.0 - dot(Nr, c.V)), _Rim3FresnelPower), _Rim3Border, _Rim3Blur);
+        float r = LumiSmoothBorder(pow(saturate(1.0 - dot(Nr, c.hV)), _Rim3FresnelPower), _Rim3Border, _Rim3Blur);
         r = LumiRimLightMask(r, Nr, c.toonDir, _Rim3LightDir, _Rim3ShadowMask, _Rim3BackfaceMask, _Rim3LitSideOnly, _Rim3LitSideBlur, lit, d.facing);
         float4 rt = LUMI_SAMPLE(_Rim3Tex, LUMI_TF(_Rim3Tex, uv));
         float3 rb = LumiRimHue(_Rim3Color.rgb, _Rim3HueSpeed) * rt.rgb * lerp(1, s.albedo, _Rim3MainStrength);
@@ -901,8 +845,8 @@ float3 LumiOffsetRimLayer(float3 col, LumiSurface s, LumiInputData d, LumiCtx c,
     offRimEmis = 0;
 #if defined(_LUMI_OFFSETRIM)
     {
-        float r = LumiOffsetRim(s.N, c.toonDir, d.screenUV, d.eyeDepth, c.NoV, c.depthValidity);
-        r *= lerp(1, saturate((1.0 - c.NoV) * 2.0), _OffsetRimFacing);
+        float r = LumiOffsetRim(s.N, c.toonDir, d.screenUV, d.eyeDepth, c.hNoV, c.depthValidity);
+        r *= lerp(1, saturate((1.0 - c.hNoV) * 2.0), _OffsetRimFacing);
         r *= saturate(1.0 - d.eyeDepth / max(_OffsetRimFadeEnd, 0.01));
         if (d.facing < 0) r = 0;
         float3 baseC = _OffsetRimColor.rgb;
@@ -940,6 +884,8 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
     c = (LumiCtx)0;
     c.V = d.viewDirWS;
     c.NoV = saturate(dot(s.N, c.V)) + 1e-4;
+    c.hV = d.styleViewDirWS;
+    c.hNoV = saturate(dot(s.N, c.hV)) + 1e-4;
     float2 uv = s.uvMain;
 
     // light direction & colors (main light + ambient / scenery / point lights, then limited)
@@ -986,7 +932,6 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         lumiWorldConf = saturate(wlen / max(mainLum + LumiLuminance(gi.L0) * 0.5, 1e-4));
         lumiWorldMain = wlen > 1e-5 ? saturate(mainLum / wlen) : 0;
     }
-    [branch] if (LumiRTLighting()) LumiRTSkySplit();
     float3 shAvg = LumiKeepChroma(gi.L0, gi.chromaKeep);
     float3 shLit = LumiGIIrradiance(gi, c.toonDir * _SHSoftness);
     float3 shShade = LumiGIIrradiance(gi, -c.toonDir * _SHSoftness);
@@ -1035,87 +980,36 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
 #endif
     // normal map detail: sample around the bumped normal so small creases of the normal map also occlude
     float3 aoN = normalize(lerp(s.Ng, s.N, _SSAONormalStrength));
-    lumiRTValidity = c.depthValidity;
-    [branch] if (lumiFXUse)
-    {
-        c.ssao = lumiFX.x;   // blurred by the FX pass + grab
-        lumiRTBounce = 0;
-    }
-    else
-    {
-        float aoIn = lumiRTAOIn;
-        [branch] if (aoIn < 0.0)
-        {
-            c.ssao = LumiSSAO(d.posWS, aoN, d.eyeDepth, d.pixelPos, c.depthValidity, aoMask);
-            // pseudo ray tracing: ray traced AO joins the SSAO
-            float3 rtB;
-            c.ssao *= LumiRTAO(d.posWS, aoN, d.eyeDepth, d.pixelPos, c.depthValidity, rtB);
-        }
-        else c.ssao = aoIn;   // (RayTrace composite pass: the main pass's AO, see LumiRTAOHandoff)
-        {
-            // the colour of what the rays hit bounces back (RayTrace shader)
-        #if defined(LUMI_RAYTRACE_GRAB)
-            float3 giD, giL, giC;
-            LumiRTGI(d.posWS, aoN, d.eyeDepth, d.pixelPos, c.depthValidity, giD, giL, giC);
-            lumiRTBounce = giD * (1.0 - _AsUnlit);
-            lumiRTGIDir = giL;
-            lumiRTGICol = giC * (1.0 - _AsUnlit);
-        #endif
-        }
-        {
-            // dots of the AO (the bounce comes smooth from the vertices: kept at full resolution; an AO handed over is
-            // smoothed already)
-            float aoSm = LumiQuadSmooth(c.ssao.xxxx, d.eyeDepth, d.pixelPos).x;
-            c.ssao = aoIn < 0.0 ? aoSm : c.ssao;
-        }
-    }
+    [branch] if (lumiFXUse) c.ssao = lumiFX.x;   // blurred by the FX pass + grab
+    else c.ssao = LumiQuadSmooth(LumiSSAO(d.posWS, aoN, d.eyeDepth, d.pixelPos, c.depthValidity, aoMask).xxxx, d.eyeDepth, d.pixelPos).x;   // (dots of the AO)
     lumiFXOut.x = c.ssao;
     c.ssao = lerp(1.0, c.ssao, lerp(1.0, saturate(s.alpha), _SSAOAlphaInfluence));   // thin / see through parts occlude less
     // occlusion colour, optionally carrying the hue of the base colour (painted look)
     float3 hueA = min(s.albedo / max(dot(s.albedo, float3(0.2126, 0.7152, 0.0722)), 0.04), 3.0);
     float3 occCol = _SSAOColor.rgb * lerp(1.0.xxx, hueA, _SSAOAlbedoTint);
     c.aoColor = lerp(occCol, 1, c.ssao);
-#if defined(_LUMI_RAYTRACE)
-    {
-        // pseudo ray tracing: occlusion the way light does it. In a gap the light still bounces between the walls, so
-        // bright surfaces darken less and the occlusion takes their colour instead of grey (multi-bounce AO fit,
-        // Jimenez et al. 2016)
-        float3 alb = saturate(s.albedo);
-        float3 ma = 2.0404 * alb - 0.3324, mb = -4.7951 * alb + 0.6417, mc = 2.7552 * alb + 0.6903;
-        float ao = c.ssao;
-        c.aoColor = lerp(c.aoColor, saturate(max(ao, ((ao * ma + mb) * ao + mc) * ao)), _RTAOMultiBounce);
-    }
-#endif
     float csMask = 1;
 #if defined(_LUMI_CONTACTSHADOW)
     csMask = LUMI_SAMPLE(_ContactShadowMask, LUMI_TF(_ContactShadowMask, uv)).r;
 #endif
-    float contact = 1, rtSh = 1;
-    // ray traced shadow along the real light (the toon light direction when the world has none)
-    // (auto light direction: the world's light, so the shadow does not turn with the view like the default key can)
-    // (ray tracing lighting without a real light: along the sky's main direction, which it shadows)
-    float3 rtL = LumiLuminance(mainLight.color) > 1e-3 ? mainLight.direction
-               : (LumiRTLighting() ? lumiSkyDir : (_LightDirMode < 0.5 ? lumiWorldL : c.toonDir));
-#if !defined(LUMI_RT_COMPOSITE)   // (RayTrace composite pass: only the reflections / bounce are drawn, no shadow rays)
-    [branch] if (lumiFXUse) contact = lumiFX.y;   // contact x ray traced shadow, blurred
+    float contact = 1, worldSh = 1;
+    [branch] if (lumiFXUse) contact = lumiFX.y;   // contact x world shadow, blurred
     else
     {
         contact = LumiContactShadow(d.posWS, s.Ng, c.toonDir, d.eyeDepth, d.pixelPos, c.depthValidity, csMask);
-        rtSh = LumiRTShadow(d.posWS, s.Ng, rtL, d.eyeDepth, d.pixelPos, c.depthValidity);
         // soft shadows module: shadow along the world's light (the shadow light cannot follow the world's light)
-        [branch] if (_UsePCSS > 0.5 && _PCSSWorldLight > 0.5) rtSh *= LumiWorldShadow(d.posWS, s.Ng, d.eyeDepth, d.pixelPos, c.depthValidity);
-        float2 q = LumiQuadSmooth(float4(contact, rtSh, 0, 0), d.eyeDepth, d.pixelPos).xy;
-        contact = q.x; rtSh = q.y;
+        [branch] if (_UsePCSS > 0.5 && _PCSSWorldLight > 0.5) worldSh = LumiWorldShadow(d.posWS, s.Ng, d.eyeDepth, d.pixelPos, c.depthValidity);
+        float2 q = LumiQuadSmooth(float4(contact, worldSh, 0, 0), d.eyeDepth, d.pixelPos).xy;
+        contact = q.x; worldSh = q.y;
     }
-#endif
-    lumiFXOut.y = contact * rtSh;
+    lumiFXOut.y = contact * worldSh;
 #if defined(LUMI_FX_WRITE)
     return 0;   // FX pass: the terms are all it needs
 #endif
     float castSh = mainLight.shadowAttenuation;
     if (_ShadowTerminatorFade > 0.001)
         castSh = lerp(1.0, castSh, smoothstep(0.0, _ShadowTerminatorFade, dot(s.Ng, mainLight.direction)));
-    float extraSh = contact * LumiDepthTexShadow(c.toonDir, d.screenUV, d.eyeDepth, c.depthValidity) * rtSh;
+    float extraSh = contact * LumiDepthTexShadow(c.toonDir, d.screenUV, d.eyeDepth, c.depthValidity) * worldSh;
     float shadow = castSh * extraSh;
     // eye shadow guard: eyelid / bang shadows, light angle shading and AO do not reach the inside of the eye
     float eyeG = LumiEyeGuard(uv);
@@ -1132,21 +1026,18 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         // the eye guard, the received shadow strength and SSAO
         LumiLight ml = mainLight;
         float cU = 1;
-#if !defined(LUMI_RT_COMPOSITE)
         [branch] if (lumiFXUse) cU = lumiFX.y;
         else cU = LumiQuadSmooth(LumiContactShadow(d.posWS, s.Ng, ml.direction, d.eyeDepth, d.pixelPos, c.depthValidity, csMask).xxxx, d.eyeDepth, d.pixelPos).x;
-#endif
-        float exU = cU * LumiDepthTexShadow(ml.direction, d.screenUV, d.eyeDepth, c.depthValidity) * rtSh;
+        float exU = cU * LumiDepthTexShadow(ml.direction, d.screenUV, d.eyeDepth, c.depthValidity) * worldSh;
         ml.shadowAttenuation = lerp(1.0, lerp(ml.shadowAttenuation * exU, 1.0, eyeG * _EyeGuardShadow), _ReceiveShadowStrength);
-        // ray tracing lighting: the sky's light is shadowed by the rays when there is no real light (they go along it)
-        lumiSkyShadow = LumiLuminance(mainLight.color) > 1e-3 ? 1.0 : lerp(1.0, lerp(rtSh, 1.0, eyeG * _EyeGuardShadow), _ReceiveShadowStrength);
         c.litLight = ml.color; c.shadeLight = c.litLight; c.rampLit = 1;
         float3 urp = LumiURPShade(s, d, ml, lerp(1.0.xxx, c.aoColor, _SSAOAmbient), lerp(1.0.xxx, c.aoColor, _SSAODirect));
         {
             // rim lights and the offset rim on top (lit side: the light's step x its shadow)
             float bwU = max(_ShadowBlur, 0.02);
             float litU = smoothstep(_ShadowBorder - bwU, _ShadowBorder + bwU, dot(s.N, c.toonDir) * 0.5 + 0.5)
-                       * (LumiLuminance(mainLight.color) > 1e-3 ? ml.shadowAttenuation : lumiSkyShadow);
+                       * (LumiLuminance(mainLight.color) > 1e-3 ? ml.shadowAttenuation
+                          : lerp(1.0, lerp(worldSh, 1.0, eyeG * _EyeGuardShadow), _ReceiveShadowStrength));   // no real light: the world shadow
             float3 rE, oE;
             urp = LumiRimLayers(urp, s, d, c, gi, mainColor, litU, rE);
             urp = LumiOffsetRimLayer(urp, s, d, c, gi, mainColor, mainLight.color, litU, oE);
@@ -1309,21 +1200,11 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
     float specOcc = lerp(1, LumiSpecularOcclusion(c.NoV, s.occlusion * lerp(1.0, c.ssao, _SSAOSpecular), s.perceptualRough), _SpecOcclusionStrength)
                   * lerp(1, LumiHorizonOcclusion(R, s.Ng), _HorizonOcclusionStrength);
     float3 envP = LumiGIReflection(gi, R, d.posWS, s.perceptualRough);
-    float3 env = LumiRTReflection(LumiLimitMax(envP), d.posWS, s.N, c.V, s.perceptualRough, d.eyeDepth, d.pixelPos, c.depthValidity);   // probe limited, ray hits up to _RTGIMaxBright
+    float3 env = LumiLimitMax(envP);   // probe, limited
     float3 envBRDF = LumiEnvironmentBRDFMin(s.f0, s.metallic, s.perceptualRough, s.a2, c.NoV) * LumiEnergyCompensation(s.f0, s.perceptualRough, c.NoV);
     float fresG = 1.0 - c.NoV; fresG *= fresG * fresG;
     envBRDF *= 1.0 + _RichGloss * 2.0 * fresG * (1.0 - s.perceptualRough * 0.7);   // edge gloss
     float3 specEnv = env * envBRDF * specOcc * _EnvReflStrength;
-    float3 giSpec = 0;
-#if defined(LUMI_RAYTRACE_GRAB)
-    {
-        // highlight from the bounce light (bright / glowing things around): the same GGX as the main light
-        float3 Lg = lumiRTGIDir, Hg = normalize(Lg + c.V);
-        giSpec = LumiDirectSpecularMin(max(s.f0, 0.04), saturate(s.a2 + lumiRTGIA2), saturate(dot(s.N, Hg)), saturate(dot(Lg, Hg))) * saturate(dot(s.N, Lg)) * lumiRTGICol * specOcc;
-    }
-#endif
-    lumiRTDelta = ((env - LumiLimitMax(envP)) * envBRDF * specOcc * _EnvReflStrength + giSpec) * s.specMask * (1.0 - _AsUnlit)
-                + s.diffuseColor * lumiRTBounce;
     specEnv += LumiLightVolumeSpecular(s.f0, 1.0 - s.perceptualRough, s.N, c.V) * specOcc * _LVSpecular;
     [branch] if (_URPMixDiffuse + _URPMixSpecular > 0.001)
     {
@@ -1345,9 +1226,9 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
     }
 #if defined(_LUMI_IRIDESCENCE)
     // thin film interference approximation (cosine spectrum over film thickness * view angle)
-    float3 irid = 0.5 + 0.5 * cos(6.2831853 * (c.NoV * _IridScale + _IridOffset + float3(0.0, 0.333, 0.667)));
+    float3 irid = 0.5 + 0.5 * cos(6.2831853 * (c.hNoV * _IridScale + _IridOffset + float3(0.0, 0.333, 0.667)));
     irid = lerp(1.0, irid, _IridSaturation);
-    float iridF = pow(saturate(1.0 - c.NoV), _IridFresnel);
+    float iridF = pow(saturate(1.0 - c.hNoV), _IridFresnel);
     float3 iridSpec = lerp(1.0, irid * _IridSpecBoost, saturate(_IridStrength) * _IridSpecOnly);
     specDirect *= iridSpec;
     specEnv *= iridSpec;
@@ -1365,15 +1246,14 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
     }
 #endif
     float3 col = diffuse * coatAtten + (specDirect + specEnv) * s.specMask * (1.0 - _AsUnlit);
-    col += s.diffuseColor * lumiRTBounce + giSpec * s.specMask * (1.0 - _AsUnlit);   // ray traced bounce light
     col += LumiTransmission(s, c, L, c.litLight, uv);
     // ambient rim: the environment wraps around the silhouette
     {
-        float rimA = LumiPow5(1.0 - c.NoV) * 2.0;
+        float rimA = LumiPow5(1.0 - c.hNoV) * 2.0;
         [branch] if (_RichAmbientRimMode > 0.5 && _RichAmbientRim > 0.001)
         {
             // toon: a flat band only on the real silhouette (background behind), none on inner edges such as a muzzle
-            rimA = smoothstep(0.55, 0.7, 1.0 - c.NoV) * LumiSilhouetteMask(s.Ng, d.screenUV, d.eyeDepth, c.depthValidity);
+            rimA = smoothstep(0.55, 0.7, 1.0 - c.hNoV) * LumiSilhouetteMask(s.Ng, d.screenUV, d.eyeDepth, c.depthValidity);
         }
         col += irrN * lerp(s.albedo, 1, 0.35) * (rimA * _RichAmbientRim) * s.occlusion * c.ssao * (1.0 - _AsUnlit);
     }
@@ -1384,9 +1264,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
     col = LumiCompatShading(s, d, c.toonDir, mainLight.direction, c.litLight, compatInd, shadowPlain, true, lit);
     col = min(col, s.albedo * _LightMaxLimit);
     col *= lerp(aoAmb, aoDir, lit);
-    col += s.albedo * LumiLimitMax(lumiRTBounce);
-    lumiRTDelta = s.albedo * LumiLimitMax(lumiRTBounce);
-    col = LumiCompatEffects(col, s, d, c.V, c.toonDir, mainLight.direction, c.litLight, lit, shadowPlain);
+    col = LumiCompatEffects(col, s, d, c.hV, c.toonDir, mainLight.direction, c.litLight, lit, shadowPlain);
     c.rampLit = lit;
 #endif
 
@@ -1457,12 +1335,12 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         }
         float3 N1 = normalize(lerp(s.Ng, Nm, _MatCapNormalStrength));
         col = LumiApplyMatCap(col, _MatCapTex, _MatCapMask, _MatCapMask_ST, _MatCapColor, _MatCapBlend, _MatCapLod, _MatCapEnableLighting, _MatCapShadowMask,
-                              _MatCapMainStrength, uv, LumiMatCapUV(N1, c.V, d.posWS, _MatCapPerspective, _MatCapZRotCancel), s.albedo, c.litLight, lit);
+                              _MatCapMainStrength, uv, LumiMatCapUV(N1, c.hV, d.posWS, _MatCapPerspective, _MatCapZRotCancel), s.albedo, c.litLight, lit);
         if (_UseMatCap2 > 0.5)
         {
             float3 N2 = normalize(lerp(s.Ng, Nm, _MatCap2NormalStrength));
             col = LumiApplyMatCap(col, _MatCap2Tex, _MatCap2Mask, _MatCap2Mask_ST, _MatCap2Color, _MatCap2Blend, _MatCap2Lod, _MatCap2EnableLighting, _MatCap2ShadowMask,
-                                  0, uv, LumiMatCapUV(N2, c.V, d.posWS, _MatCapPerspective, _MatCapZRotCancel), s.albedo, c.litLight, lit);
+                                  0, uv, LumiMatCapUV(N2, c.hV, d.posWS, _MatCapPerspective, _MatCapZRotCancel), s.albedo, c.litLight, lit);
         }
     }
 #endif
@@ -1480,8 +1358,8 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         // procedural hair highlight ring: band of the normal's height (how much it points up), broken up along UV.x.
         // Measured against the world's up so the ring stays on the hair wherever the camera is; "view follow" blends
         // toward the camera's up (1 = the old view space ring, which slid over the hair as the camera moved / tilted)
-        float3 nV = LumiWorldToViewDir(s.N);
-        float3 upV = normalize(lerp(float3(0, 1, 0), UNITY_MATRIX_V[1].xyz, _AngelViewFollow) + float3(0, 1e-4, 0));
+        float3 nV = float3(dot(s.N, LumiStyleViewRow(0)), dot(s.N, LumiStyleViewRow(1)), dot(s.N, LumiStyleViewRow(2)));
+        float3 upV = normalize(lerp(float3(0, 1, 0), LumiStyleViewRow(1), _AngelViewFollow) + float3(0, 1e-4, 0));
         float band = smoothstep(_AngelWidth, _AngelWidth * (1.0 - _AngelBlur), abs(dot(s.N, upV) - _AngelHeight));
         band *= saturate(nV.z * 2.0);
         float br = sin(d.uv0.x * _AngelFrequency * 6.2831853) * 0.5 + 0.5;
@@ -1500,7 +1378,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
     {
         float y = d.posWS.y * _HoloLineDensity + _Time.y * _HoloLineSpeed;
         float scan = sin(y * 6.2831853) * 0.5 + 0.5;
-        float fres = pow(saturate(1.0 - c.NoV), _HoloFresnel);
+        float fres = pow(saturate(1.0 - c.hNoV), _HoloFresnel);
         float flick = lerp(1, 0.65 + 0.35 * sin(_Time.y * _HoloFlickerSpeed + sin(_Time.y * _HoloFlickerSpeed * 0.3) * 3.0), _HoloFlicker);
         float h = saturate(fres + scan * 0.5) * flick;
         col += _HoloColor.rgb * h * _HoloStrength;
@@ -1559,7 +1437,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
             // falls back to fresnel), green = the depth step the rim finds, blue tint = right eye
             float rr = 0;
 #if defined(_LUMI_OFFSETRIM)
-            rr = LumiOffsetRim(s.N, c.toonDir, d.screenUV, d.eyeDepth, c.NoV, 1.0);
+            rr = LumiOffsetRim(s.N, c.toonDir, d.screenUV, d.eyeDepth, c.hNoV, 1.0);
 #endif
 #if defined(USING_STEREO_MATRICES)
             float eye = (float)unity_StereoEyeIndex;

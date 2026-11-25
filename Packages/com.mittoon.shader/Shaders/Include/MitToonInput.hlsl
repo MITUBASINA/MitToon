@@ -61,12 +61,8 @@ CBUFFER_START(UnityPerMaterial)
     float4 _LightDirOverride;
     float  _TessEdgeLength, _TessMax, _TessPhong, _TessFadeStart, _TessFadeEnd;
     float  _LightColorMode, _LightMapMode, _UnlitIntensity, _LightViewYaw, _LightViewPitch;
-    float  _URPShading, _URPMixDiffuse, _URPMixSpecular, _RTSkyLight;
-    float  _RTShadowStrength, _RTShadowLength, _RTShadowSoftness, _RTShadowRays, _RTShadowSteps, _RTShadowThickness, _RTShadowBias;
-    float  _RTAOStrength, _RTAORadius, _RTAORays, _RTAOSteps, _RTAOThickness, _RTGIStrength;
-    float  _RTGIRays, _RTGILength, _RTGISpecular, _RTGIMaxBright, _RTAOMultiBounce;
-    float  _RTAlphaDst, _Cull;
-    float  _RTReflStrength, _RTReflLength, _RTReflSteps, _RTReflThickness, _RTReflRoughCut, _RTMaxDistance;
+    float  _URPShading, _URPMixDiffuse, _URPMixSpecular;
+    float  _Cull;
     float  _AutoShadowColor, _AutoShadowHue, _AutoShadowDarkness, _QLodDistance;
     float  _AddLightSoftness, _AddLightCastShadow;
     float  _AddLightMaxLimit, _AddLightPassthrough, _AddLightMonochrome, _AddLightSmoothFalloff, _AddLightIgnoreDirectional, _LightDirKeepUp;
@@ -204,7 +200,7 @@ CBUFFER_START(UnityPerMaterial)
     float4 _HoloColor;
     float  _HoloStrength, _HoloLineDensity, _HoloLineSpeed, _HoloFresnel, _HoloFlicker, _HoloAlpha;
     float4 _SkyTopColor, _SkyHorizonColor, _SkyGroundColor;
-    float  _WorldAdapt, _WorldAdaptTarget, _WorldAdaptRange, _DebugView;
+    float  _WorldAdapt, _WorldAdaptTarget, _WorldAdaptRange, _DebugView, _VRParallax;
     // v1.2: double outline
     float  _Outline2Width, _Outline2MainBlend, _Outline2EnableLighting, _Outline2ZBias, _Outline2Silhouette;
     float4 _Outline2Color;

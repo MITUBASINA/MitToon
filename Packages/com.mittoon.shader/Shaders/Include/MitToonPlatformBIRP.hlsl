@@ -39,6 +39,20 @@ float3 LumiGetCameraPositionWS()
 #endif
 }
 float3 LumiGetEyePositionWS() { return _WorldSpaceCameraPos; }
+// VR: the looks drawn from the viewing direction that are not real reflections (rims, matcaps, fresnel colours, edge
+// tint, angel ring) are taken from the head (between the eyes), so both eyes get the same picture; from each eye's own
+// position they land in different places per eye and do not fuse (double / flickering rims). VR Parallax 1 = per eye.
+// Desktop and cameras: the camera itself either way.
+float3 LumiStyleEyePositionWS() { return lerp(LumiGetCameraPositionWS(), LumiGetEyePositionWS(), _VRParallax); }
+float3 LumiStyleViewRow(int r)
+{
+#if defined(USING_STEREO_MATRICES)
+    float3 head = unity_StereoMatrixV[0][r].xyz + unity_StereoMatrixV[1][r].xyz;   // canted displays: the eyes' axes differ
+    return normalize(lerp(normalize(head), UNITY_MATRIX_V[r].xyz, _VRParallax));
+#else
+    return UNITY_MATRIX_V[r].xyz;
+#endif
+}
 
 float3 LumiObjectToWorld(float3 p)   { return mul(unity_ObjectToWorld, float4(p, 1)).xyz; }
 float3 LumiObjectToWorldDir(float3 d){ return UnityObjectToWorldDir(d); }

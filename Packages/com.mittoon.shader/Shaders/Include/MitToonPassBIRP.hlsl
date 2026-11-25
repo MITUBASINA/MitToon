@@ -47,11 +47,6 @@ struct v2f
     float4 lv2       : TEXCOORD15;
     #endif
 #endif
-#if defined(LUMI_RT_COMPOSITE)
-    float4 rtgi0     : TEXCOORD17;   // ray traced bounce probe per vertex (see LumiRTGIVertex)
-    float4 rtgi1     : TEXCOORD18;
-    float4 rtgi2     : TEXCOORD19;
-#endif
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
 };
@@ -265,12 +260,7 @@ v2f vert(appdata v)
     LumiLVVertex(o.posWS, normalize(o.normalWS), o.lv0, o.lv1, o.lv2);
     #endif
 #endif
-#if defined(LUMI_RT_COMPOSITE)
-    LumiRTGIVertex(o.posWS, o.normalWS, o.rtgi0, o.rtgi1, o.rtgi2);
-#endif
-    // passes that would draw nothing are not rasterised at all (no pixel runs): the FX pass with the blur off, the
-    // RayTrace composite pass with nothing to add (ray tracing off, bounce and reflections off, see through surfaces
-    // (not in the depth texture), no depth texture)
+    // passes that would draw nothing are not rasterised at all (no pixel runs): the FX pass with the blur off
 #if defined(LUMI_FX_WRITE)
     if (!LumiFXActive()) o.pos = LUMI_NAN4;
 #endif
@@ -288,13 +278,6 @@ v2f vert(appdata v)
     if (shadowLight) o.pos = LUMI_NAN4;
   #endif
 #endif
-#if defined(LUMI_RT_COMPOSITE)
-    #if !defined(_LUMI_RAYTRACE) || defined(_ALPHABLEND_ON) || defined(_ALPHAPREMULTIPLY_ON)
-    o.pos = LUMI_NAN4;
-    #else
-    if (_RTGIStrength + _RTGISpecular + _RTReflStrength <= 0.001 || !LumiDepthTextureAvailable()) o.pos = LUMI_NAN4;
-    #endif
-#endif
     return o;
 }
 
@@ -309,6 +292,7 @@ LumiInputData LumiBuildInput(v2f i, float facing)
     d.normalWS = i.normalWS;
     d.tangentWS = i.tangentWS;
     d.viewDirWS = normalize(LumiGetEyePositionWS() - i.posWS);
+    d.styleViewDirWS = normalize(LumiStyleEyePositionWS() - i.posWS);
     d.color = i.color;
     d.screenUV = i.screenPos.xy / i.screenPos.w;
     d.pixelPos = i.pos.xy;
@@ -334,35 +318,7 @@ float4 fragBase(v2f i, float facing : VFACE) : SV_Target
 {
     UNITY_SETUP_INSTANCE_ID(i);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
-#if defined(LUMI_RT_COMPOSITE)
-    lumiRTGIV0 = i.rtgi0; lumiRTGIV1 = i.rtgi1; lumiRTGIV2 = i.rtgi2;
-#endif
     LumiInputData d = LumiBuildInput(i, facing > 0 ? 1 : -1);
-#if defined(LUMI_RT_COMPOSITE)
-#if !defined(_LUMI_RAYTRACE)
-    discard;   // (pseudo ray tracing off)
-#endif
-    // nothing to add (bounce and reflections off): the main pass drew it all
-    if (_RTGIStrength + _RTGISpecular + _RTReflStrength <= 0.001) discard;
-    bool aoHand = LumiRTAOHandoff();
-#if defined(LUMI_RT_PYRAMID)
-    [branch] if (aoHand)
-    {
-        // the main pass's AO from the alpha, but at the three pixels the token of the blurred screen is in
-        float2 eye = LumiEyeSize();
-        int2 q = int2(LumiEyeLocal(d.screenUV) * eye), t0 = LumiRTTokenPx(eye);
-        if (q.y != t0.y || q.x < t0.x || q.x > t0.x + 2) lumiRTAOIn = LUMI_GRAB_SAMPLE4(LumiGrabUV(d.screenUV)).a;
-    }
-#endif
-#endif
-#if defined(LUMI_RT_COMPOSITE)
-    [branch] if (LumiScreenSpaceValidity(d) * LumiRTFade(d.eyeDepth) <= 0.001)
-    {
-        // every term the pass adds is scaled by these: nothing to add
-        if (!aoHand) discard;
-        return float4(LUMI_GRAB_SAMPLE(LumiGrabUV(d.screenUV)), 1.0);   // (the alpha back to 1 after the AO)
-    }
-#endif
     LumiNearDither(d);
     LumiSurface s = LumiInitSurface(d);
     lumiPixel = d.pixelPos;
@@ -391,9 +347,6 @@ float4 fragBase(v2f i, float facing : VFACE) : SV_Target
 #endif
 
     UNITY_LIGHT_ATTENUATION(atten, i, i.posWS);
-#if defined(LUMI_RT_COMPOSITE)
-    atten = 1;   // RayTrace composite pass: the shadow does not reach the reflections / bounce it draws
-#else
     [branch] if (lumiFXUse) atten = lumiFX.z;   // blurred by the FX pass + grab
     else
     {
@@ -413,7 +366,6 @@ float4 fragBase(v2f i, float facing : VFACE) : SV_Target
 #endif
     if (_ReceiveCastShadow < 0.5) atten = 1;   // cast shadows off: shading, contact / depth shadows and AO stay
     }
-#endif
     lumiFXOut.z = atten;
 #if defined(_LUMI_SOFTSHADOW)
     atten = LumiSmoothBorder(atten, 0.5, 0.5 * max(_ShadowSmoothness, 0.01) + 0.001) * step(0.001, _ShadowSmoothness) + atten * step(_ShadowSmoothness, 0.001);
@@ -429,14 +381,6 @@ float4 fragBase(v2f i, float facing : VFACE) : SV_Target
     return float4(lumiFXOut + s.albedo.r * 1e-9, LUMI_FX_MARK);
 #endif
 
-#if defined(LUMI_RT_COMPOSITE)
-    // RayTrace shader, second pass: the screen with this surface already drawn + what the rays found
-    float4 dr = float4(lumiRTDelta * i.fogFactor, 0);
-    float3 dl = lerp(dr.rgb, LumiQuadSmooth(dr, d.eyeDepth, d.pixelPos).rgb, lumiRTReflSmooth);   // dots of rough reflections only
-    if (!aoHand && dot(abs(dl), 1.0) < 1e-5) discard;   // (with the AO handed over every pixel puts the alpha back to 1)
-    float4 gc = LUMI_GRAB_SAMPLE4(LumiGrabUV(d.screenUV));
-    return float4(max(gc.rgb + dl, 0.0), aoHand ? 1.0 : 0.0);   // (alpha: back to 1 after the AO, or kept by the blend)
-#endif
 
 #if defined(UNITY_PASS_FORWARDBASE)
 #if !defined(_LUMI_COMPAT)
@@ -448,9 +392,6 @@ float4 fragBase(v2f i, float facing : VFACE) : SV_Target
     col.rgb = LumiFinalGrade(col.rgb, false);
     LUMI_APPLY_FOG(i, col);
     col = LumiOutputAlpha(col);
-#if defined(LUMI_RT_BASE)
-    if (LumiRTAOHandoff()) col.a = lumiFXOut.x;   // the AO for the composite pass (it puts the alpha back to 1)
-#endif
     return col;
 }
 
@@ -663,10 +604,9 @@ float4 fragAdd(v2f i, float facing : VFACE) : SV_Target
     LumiCtx c = (LumiCtx)0;
     c.V = d.viewDirWS;
     c.NoV = saturate(dot(s.N, c.V)) + 1e-4;
+    c.hV = d.styleViewDirWS;
+    c.hNoV = saturate(dot(s.N, c.hV)) + 1e-4;
     c.litLight = l.color;
-#if defined(_LUMI_RAYTRACE)
-    lumiRTValidity = LUMI_URP_MODEL && _RTShadowStrength > 0.001 ? LumiScreenSpaceValidity(d) : 0;
-#endif
     c.rampLit = 1;
 
     float4 col = float4(LumiShadeAdditional(s, d, c, l), s.alpha);
