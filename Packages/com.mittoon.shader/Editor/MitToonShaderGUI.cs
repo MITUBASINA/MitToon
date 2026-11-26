@@ -2079,8 +2079,8 @@ namespace MitToon.Editor
             if (!Module("advanced", "詳細設定 (深度 / ステンシル)", "Advanced (Depth / Stencil)")) return;
             DebugPopup();
             Prop("_VRParallax");
-            Info("0: リムやマットキャップなどを両目の中央から計算し、左右の目で同じ見え方にします (二重に見えたりチラついたりしません)。1: 以前の目ごとの計算です。デスクトップでは変わりません。",
-                 "0: rims, matcaps and similar looks are computed from between the eyes, so both eyes see the same (no doubled or flickering rims). 1: per eye, as before. No change on desktop.", MessageType.None);
+            Info("0: リムやマットキャップなどを両目の中央から計算し、コンタクトシャドウ・SSAO・深度影・深度リムは両目の深度から計算して平均するので、左右の目で同じ見え方になります (二重に見えたりチラついたりしません)。深度を使う効果は VR でだけ 2 回計算されます。1: 以前の目ごとの計算です。デスクトップでは変わりません。",
+                 "0: rims, matcaps and similar looks are computed from between the eyes, and contact shadows, SSAO, depth shadows and depth rims from both eyes' depth (averaged), so both eyes see the same (no doubling or flicker). The depth effects run twice in VR only. 1: per eye, as before. No change on desktop.", MessageType.None);
             Props("_ZWrite", "_ZTest", "_AlphaToMask", "_OffsetFactor", "_OffsetUnits");
             DrawStencil();
             if (!collecting && !Searching)

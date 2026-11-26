@@ -780,6 +780,7 @@ float LumiScreenSpaceValidity(LumiInputData d)
 #if defined(_ALPHABLEND_ON) || defined(_ALPHAPREMULTIPLY_ON)
     v = 0;   // a blended surface is not in the depth texture (SSAO / contact / depth rim would read what is behind it)
 #endif
+    LumiSSStereoSetup(d.posWS, v);   // VR: the other eye's view of this point (same result in both eyes)
     return v;
 }
 
@@ -807,7 +808,7 @@ float3 LumiRimLayers(float3 col, LumiSurface s, LumiInputData d, LumiCtx c, Lumi
         float3 Nr = normalize(lerp(s.Ng, s.N, _RimNormalStrength));
         float r = LumiSmoothBorder(pow(saturate(1.0 - dot(Nr, c.hV)), _RimFresnelPower), _RimBorder, _RimBlur);
         if (_RimMode > 0.5 && c.depthValidity > 0.5)
-            r = LumiDepthRim(Nr, d.screenUV, d.eyeDepth, _RimDepthWidth, _RimDepthThreshold) * lerp(1, r, 0.25);
+            r = LumiDepthRimVR(Nr, d.screenUV, d.eyeDepth, _RimDepthWidth, _RimDepthThreshold, c.depthValidity) * lerp(1, r, 0.25);
         r = LumiRimLightMask(r, Nr, c.toonDir, _RimLightDir, _RimShadowMask, _RimBackfaceMask, _RimLitSideOnly, _RimLitSideBlur, lit, d.facing);
         float4 rt = LUMI_SAMPLE(_RimTex, LUMI_TF(_RimTex, uv));
         float3 rb = LumiRimHue(_RimColor.rgb, _RimHueSpeed) * rt.rgb * lerp(1, s.albedo, _RimMainStrength);
@@ -845,7 +846,7 @@ float3 LumiOffsetRimLayer(float3 col, LumiSurface s, LumiInputData d, LumiCtx c,
     offRimEmis = 0;
 #if defined(_LUMI_OFFSETRIM)
     {
-        float r = LumiOffsetRim(s.N, c.toonDir, d.screenUV, d.eyeDepth, c.hNoV, c.depthValidity);
+        float r = LumiOffsetRimVR(s.N, c.toonDir, d.screenUV, d.eyeDepth, c.hNoV, c.depthValidity);
         r *= lerp(1, saturate((1.0 - c.hNoV) * 2.0), _OffsetRimFacing);
         r *= saturate(1.0 - d.eyeDepth / max(_OffsetRimFadeEnd, 0.01));
         if (d.facing < 0) r = 0;
@@ -981,7 +982,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
     // normal map detail: sample around the bumped normal so small creases of the normal map also occlude
     float3 aoN = normalize(lerp(s.Ng, s.N, _SSAONormalStrength));
     [branch] if (lumiFXUse) c.ssao = lumiFX.x;   // blurred by the FX pass + grab
-    else c.ssao = LumiQuadSmooth(LumiSSAO(d.posWS, aoN, d.eyeDepth, d.pixelPos, c.depthValidity, aoMask).xxxx, d.eyeDepth, d.pixelPos).x;   // (dots of the AO)
+    else c.ssao = LumiQuadSmooth(LumiSSAOVR(d.posWS, aoN, d.eyeDepth, d.pixelPos, c.depthValidity, aoMask).xxxx, d.eyeDepth, d.pixelPos).x;   // (dots of the AO)
     lumiFXOut.x = c.ssao;
     c.ssao = lerp(1.0, c.ssao, lerp(1.0, saturate(s.alpha), _SSAOAlphaInfluence));   // thin / see through parts occlude less
     // occlusion colour, optionally carrying the hue of the base colour (painted look)
@@ -996,9 +997,9 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
     [branch] if (lumiFXUse) contact = lumiFX.y;   // contact x world shadow, blurred
     else
     {
-        contact = LumiContactShadow(d.posWS, s.Ng, c.toonDir, d.eyeDepth, d.pixelPos, c.depthValidity, csMask);
+        contact = LumiContactShadowVR(d.posWS, s.Ng, c.toonDir, d.eyeDepth, d.pixelPos, c.depthValidity, csMask);
         // soft shadows module: shadow along the world's light (the shadow light cannot follow the world's light)
-        [branch] if (_UsePCSS > 0.5 && _PCSSWorldLight > 0.5) worldSh = LumiWorldShadow(d.posWS, s.Ng, d.eyeDepth, d.pixelPos, c.depthValidity);
+        [branch] if (_UsePCSS > 0.5 && _PCSSWorldLight > 0.5) worldSh = LumiWorldShadowVR(d.posWS, s.Ng, d.eyeDepth, d.pixelPos, c.depthValidity);
         float2 q = LumiQuadSmooth(float4(contact, worldSh, 0, 0), d.eyeDepth, d.pixelPos).xy;
         contact = q.x; worldSh = q.y;
     }
@@ -1009,7 +1010,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
     float castSh = mainLight.shadowAttenuation;
     if (_ShadowTerminatorFade > 0.001)
         castSh = lerp(1.0, castSh, smoothstep(0.0, _ShadowTerminatorFade, dot(s.Ng, mainLight.direction)));
-    float extraSh = contact * LumiDepthTexShadow(c.toonDir, d.screenUV, d.eyeDepth, c.depthValidity) * worldSh;
+    float extraSh = contact * LumiDepthTexShadowVR(c.toonDir, d.screenUV, d.eyeDepth, c.depthValidity) * worldSh;
     float shadow = castSh * extraSh;
     // eye shadow guard: eyelid / bang shadows, light angle shading and AO do not reach the inside of the eye
     float eyeG = LumiEyeGuard(uv);
@@ -1027,8 +1028,8 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         LumiLight ml = mainLight;
         float cU = 1;
         [branch] if (lumiFXUse) cU = lumiFX.y;
-        else cU = LumiQuadSmooth(LumiContactShadow(d.posWS, s.Ng, ml.direction, d.eyeDepth, d.pixelPos, c.depthValidity, csMask).xxxx, d.eyeDepth, d.pixelPos).x;
-        float exU = cU * LumiDepthTexShadow(ml.direction, d.screenUV, d.eyeDepth, c.depthValidity) * worldSh;
+        else cU = LumiQuadSmooth(LumiContactShadowVR(d.posWS, s.Ng, ml.direction, d.eyeDepth, d.pixelPos, c.depthValidity, csMask).xxxx, d.eyeDepth, d.pixelPos).x;
+        float exU = cU * LumiDepthTexShadowVR(ml.direction, d.screenUV, d.eyeDepth, c.depthValidity) * worldSh;
         ml.shadowAttenuation = lerp(1.0, lerp(ml.shadowAttenuation * exU, 1.0, eyeG * _EyeGuardShadow), _ReceiveShadowStrength);
         c.litLight = ml.color; c.shadeLight = c.litLight; c.rampLit = 1;
         float3 urp = LumiURPShade(s, d, ml, lerp(1.0.xxx, c.aoColor, _SSAOAmbient), lerp(1.0.xxx, c.aoColor, _SSAODirect));
@@ -1253,7 +1254,7 @@ float4 LumiShadeBase(LumiSurface s, LumiInputData d, LumiLight mainLight, out Lu
         [branch] if (_RichAmbientRimMode > 0.5 && _RichAmbientRim > 0.001)
         {
             // toon: a flat band only on the real silhouette (background behind), none on inner edges such as a muzzle
-            rimA = smoothstep(0.55, 0.7, 1.0 - c.hNoV) * LumiSilhouetteMask(s.Ng, d.screenUV, d.eyeDepth, c.depthValidity);
+            rimA = smoothstep(0.55, 0.7, 1.0 - c.hNoV) * LumiSilhouetteMaskVR(s.Ng, d.screenUV, d.eyeDepth, c.depthValidity);
         }
         col += irrN * lerp(s.albedo, 1, 0.35) * (rimA * _RichAmbientRim) * s.occlusion * c.ssao * (1.0 - _AsUnlit);
     }

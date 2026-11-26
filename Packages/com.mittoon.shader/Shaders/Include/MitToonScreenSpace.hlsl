@@ -485,5 +485,90 @@ float LumiSoftScreenShadow(float3 posWS, float3 N, float3 L, float2 screenUV, fl
 }
 #endif
 
+// ---- VR: one screen space result for both eyes -------------------------------------------------------------------
+// Each eye reads its own depth texture, so contact shadows, AO, depth shadows, the world shadow and the depth rims
+// land a little differently per eye (from 6 cm apart an occluder hides other points) and the two pictures do not fuse:
+// the shading flickers. With single pass instanced / multiview stereo both eyes' depth textures are bound (one array),
+// so each eye also runs the effect for the other eye's view of the same point and both use the average, weighted by
+// whether each eye sees the point. The effects cost twice in VR only. VR Parallax 1 = each eye its own result.
+#if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
+    #define LUMI_SS_STEREO 1
+#endif
+static bool lumiSSBoth = false;   // the other eye sees this point too: average with its result
+static uint lumiSSOwn = 0, lumiSSOther = 1;
+static float2 lumiSSOUV = 0, lumiSSOPixel = 0;   // the other eye's screen UV / pixel of this point
+static float lumiSSODepth = 1, lumiSSOValid = 0;
+
+// call once per pixel, before the effects (ownValidity: this eye's LumiDepthValidity and the other conditions)
+void LumiSSStereoSetup(float3 posWS, float ownValidity)
+{
+#if defined(LUMI_SS_STEREO)
+    lumiSSBoth = false;
+    if (_VRParallax >= 0.999 || ownValidity <= 0.001) return;
+    lumiSSOwn = unity_StereoEyeIndex; lumiSSOther = 1u - lumiSSOwn;
+    unity_StereoEyeIndex = lumiSSOther;   // (the matrices, camera position and depth slice follow the eye index)
+    float dep;
+    float2 uv = LumiWorldToScreenUV(posWS, dep);
+    lumiSSOUV = uv; lumiSSODepth = dep; lumiSSOPixel = uv * _ScreenParams.xy;
+    lumiSSOValid = (all(uv >= 0) && all(uv <= 1) && dep > 0) ? LumiDepthValidity(uv, dep) : 0;
+    unity_StereoEyeIndex = lumiSSOwn;
+    lumiSSBoth = lumiSSOValid > 0.001;
+#endif
+}
+float LumiSSMix(float own, float wOwn, float other)
+{
+    float w = wOwn + lumiSSOValid;
+    float both = w > 1e-3 ? (own * wOwn + other * lumiSSOValid) / w : own;
+    return lerp(both, own, _VRParallax);
+}
+#if defined(LUMI_SS_STEREO)
+    #define LUMI_SS_OTHER_EYE(r, wOwn, CALL) [branch] if (lumiSSBoth) { unity_StereoEyeIndex = lumiSSOther; float o_ = CALL; unity_StereoEyeIndex = lumiSSOwn; r = LumiSSMix(r, wOwn, o_); }
+#else
+    #define LUMI_SS_OTHER_EYE(r, wOwn, CALL)
+#endif
+
+float LumiSSAOVR(float3 posWS, float3 N, float eyeDepth, float2 pixel, float validity, float mask)
+{
+    float r = LumiSSAO(posWS, N, eyeDepth, pixel, validity, mask);
+    LUMI_SS_OTHER_EYE(r, validity, LumiSSAO(posWS, N, lumiSSODepth, lumiSSOPixel, lumiSSOValid, mask))
+    return r;
+}
+float LumiContactShadowVR(float3 posWS, float3 N, float3 L, float eyeDepth, float2 pixel, float validity, float mask)
+{
+    float r = LumiContactShadow(posWS, N, L, eyeDepth, pixel, validity, mask);
+    LUMI_SS_OTHER_EYE(r, validity, LumiContactShadow(posWS, N, L, lumiSSODepth, lumiSSOPixel, lumiSSOValid, mask))
+    return r;
+}
+float LumiWorldShadowVR(float3 posWS, float3 N, float eyeDepth, float2 pixel, float validity)
+{
+    float r = LumiWorldShadow(posWS, N, eyeDepth, pixel, validity);
+    LUMI_SS_OTHER_EYE(r, validity, LumiWorldShadow(posWS, N, lumiSSODepth, lumiSSOPixel, lumiSSOValid))
+    return r;
+}
+float LumiDepthTexShadowVR(float3 L, float2 screenUV, float eyeDepth, float validity)
+{
+    float r = LumiDepthTexShadow(L, screenUV, eyeDepth, validity);
+    LUMI_SS_OTHER_EYE(r, validity, LumiDepthTexShadow(L, lumiSSOUV, lumiSSODepth, lumiSSOValid))
+    return r;
+}
+float LumiDepthRimVR(float3 N, float2 screenUV, float eyeDepth, float widthCm, float threshold, float validity)
+{
+    float r = LumiDepthRim(N, screenUV, eyeDepth, widthCm, threshold);
+    LUMI_SS_OTHER_EYE(r, validity, LumiDepthRim(N, lumiSSOUV, lumiSSODepth, widthCm, threshold))
+    return r;
+}
+float LumiSilhouetteMaskVR(float3 N, float2 screenUV, float eyeDepth, float validity)
+{
+    float r = LumiSilhouetteMask(N, screenUV, eyeDepth, validity);
+    LUMI_SS_OTHER_EYE(r, validity, LumiSilhouetteMask(N, lumiSSOUV, lumiSSODepth, lumiSSOValid))
+    return r;
+}
+float LumiOffsetRimVR(float3 N, float3 L, float2 screenUV, float eyeDepth, float NoV, float validity)
+{
+    float r = LumiOffsetRim(N, L, screenUV, eyeDepth, NoV, validity);
+    LUMI_SS_OTHER_EYE(r, validity, LumiOffsetRim(N, L, lumiSSOUV, lumiSSODepth, NoV, lumiSSOValid))
+    return r;
+}
+
 #endif
 

@@ -779,7 +779,7 @@ Shader "MitToon/MitToon Outline TwoPass"
         _WorldAdaptTarget ("目標の明るさ|Target Brightness", Range(0.05, 2)) = 0.8
         _WorldAdaptRange ("補正の上限 (倍)|Max Correction (x)", Range(1, 8)) = 3
         [IntRange] _DebugView ("デバッグ表示|Debug View", Range(0, 10)) = 0
-        _VRParallax ("VR の目ごとの見え方 (リム / マットキャップなど)|VR Per-Eye Looks (rims, matcaps...)", Range(0, 1)) = 0
+        _VRParallax ("VR の目ごとの見え方 (リム / マットキャップ / 深度の影など)|VR Per-Eye Looks (rims, matcaps, depth shadows...)", Range(0, 1)) = 0
 
         // ---------- tessellation (used by the Tessellation shader variants only) ----------
         _TessEdgeLength ("分割の細かさ (画面上の辺の長さ px)|Edge Length (pixels on screen)", Range(2, 50)) = 12
